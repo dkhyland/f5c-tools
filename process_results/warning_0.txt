@@ -1,0 +1,22 @@
+[init_cuda::INFO][1;34m Your GPU can accommodate upto 5.4M bases. You may increase -B option (currently 2.0M) for better performance![0m
+[slow_fast5_warn::INFO][1;34m Fast5 reading took more time than processing. Try increasing --iop. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[load_balance_advisor::INFO][1;34m CPU got too much work. Try --skip-ultra, decreasing --ultra-thresh or increasing -t. Else, CPU is too weaker than GPUa and just ignore. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
+[memory_balance_advisor::INFO][1;34m GPU arrays under-utilised. Try increasing -K. See http://bit.ly/f5cperf[0m
