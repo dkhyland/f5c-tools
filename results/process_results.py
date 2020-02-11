@@ -1,8 +1,6 @@
-import subprocess
 import sys
 import os.path
 import argparse
-from collections import OrderedDict
 
 #constants
 EPSILON = 0.0001
@@ -164,7 +162,7 @@ def handle_direction(direction,param_index,main_params,second_params):
         final_value = float(main_value + second_value)/2.0
     elif(abs(direction) == 1):
         #take the value of test_1 or test_2
-        final_value = main_value if direction == 1 else second_params[param_index]
+        final_value = main_value
         stop_test = True
     elif(direction == 0):
         #take the midpoint parameter
@@ -197,16 +195,22 @@ def open_file(filename,mode):
 #extract parameter values from a result file such as {useful/raw}.txt
 def read_result_file(filename):
     parameter_values = []
+
     #use test output
     TEST_FILE = open_file(filename,"r")
     test_data = TEST_FILE.readlines()
-    if(len(test_data) < 4):
+
+    #error checking
+    if(len(test_data) < 1):
         print(f"{filename} does not have enough data or profile variable should be true")
         return
+
     for i in range(len(test_data)-1,len(test_data)-5,-1):
         if( "max-lf:" in test_data[i].split(" ")):
             test_parameters = test_data[i].split(", ")
             break
+
+    #get the data
     for i in range(NUM_PARAMETERS):
         test_data = test_parameters[i].split(": ")
         try:
@@ -301,13 +305,16 @@ Functions to be called in the main program
 calculate_averages
 ============================================================================================================
 calculate average runtime for different performance metrics for each group of tests with the same parameters
+function outputs to averages.txt
 """
 
 def calculate_averages():
     parser = argparse.ArgumentParser()
     parser.add_argument('filename',help='Full path to the parameters.txt file that contains parameters and results for different tests')
+    parser.add_argument('-n',type=int,default=-1,help='Number of runs for each set of parameters')
     args = parser.parse_args(sys.argv[2:])
     filename = args.filename
+    n = args.n
     #remove number at beginning of each line
     FILE = open_file(filename,"r")
     data = FILE.readlines()
@@ -347,19 +354,24 @@ def calculate_averages():
     #list that contains lists of average metric values for each group of tests
     all_averages = []
 
-    #load data from the first entry
-    #counter for which metric we are looking at
-    k=0
-    for j in range(NUM_PARAMETERS,NUM_PARAMETERS+NUM_METRICS):
-        metric_values[k].append(data_dict[0][keys[j]])
-        k += 1
     #counter for which group of tests we are looking at
     test_num=-1
 
     #calculate and store the average value for each metric for each test group
     for i in range(len(data_dict)):
-        #if the next test is a new test group, calculate average for the current group and save it
-        if(i == len(data_dict) - 1 or not same_parameters(data_dict[i],data_dict[i+1])):
+        #load data from the data_dict. k is index for positions in the metric_values list
+        k=0
+        for j in range(NUM_PARAMETERS,NUM_PARAMETERS+NUM_METRICS):
+            metric_values[k].append(data_dict[i][keys[j]])
+            k += 1
+        append_averages = False
+        if(i == len(data_dict) - 1):
+            append_averages = True
+        if(n == -1 and not same_parameters(data_dict[i],data_dict[i+1])):
+            append_averages = True
+        elif(i % n == 0):
+            append_averages = True
+        if(append_averages):
             #temporary variable that stores averages for each metric for one group of tests.
             group_averages = []
             #calculate averages for each metric and store them in group_averages
@@ -373,11 +385,8 @@ def calculate_averages():
                 group_params[test_num].append(data_dict[i][keys[k]])
             #reset temporary variable
             metric_values = [[] for l in range(NUM_PARAMETERS)]
-        #index for positions in the metric_values list
-        k=0
-        for j in range(NUM_PARAMETERS,NUM_PARAMETERS+NUM_METRICS):
-            metric_values[k].append(data_dict[i][keys[j]])
-            k += 1
+
+
     #take the path to the parameters file and replace parameters with averages
     output_file = filename.split("/")[:-1]
     output_file.append("averages.txt")
@@ -390,12 +399,15 @@ evaluate_adjustments
 Compare performance metrics before and after adjusting parameters. Tells whether to stop, keep doubling/halving, or take midpoint
 Should be used when only 1 parameter is adjusted at a time (running average without -o flag)
 Test 1 is the newer test in which a parameter from test 2 was adjusted
+Functions writes new parameters to new.profile, a boolean value to stop.test and the parameters to pass into the next evaluate()
+call in evaluate.parameters.
 """
 
 def evaluate_adjustments():
     #parse arguments for the function
     parser = argparse.ArgumentParser()
     parser.add_argument('average',help='Path to the averages.txt file that contains average test metrics')
+    parser.add_argument('--parameter','-p',type=int,default=-1,help='Optional number of the parameter that is being tuned. If not, the first parameter that is different is selected.')
     parser.add_argument('test_1',type=int,help='Line number of the more recent test in the averages.txt file to compare with a previous test')
     parser.add_argument('test_2',type=int,help='Line number of a previous test in the averages.txt to be compared against')
     parser.add_argument('streak',type=int,help='How many doubles/halves we have done in a row')
@@ -411,24 +423,38 @@ def evaluate_adjustments():
     w_limit = args.w_limit
     s_limit = args.s_limit
     midpoint = args.midpoint
+    param_number= args.parameter
 
     #list that contains all the argument values to this function for the next iteration. contents are written to a evaluate.params file
     evaluate_params = []
 
+    # i = 0
+    # test_1 = []
+    # test_2 = []
+    # params_1 = []
+    # params_2 = []
     #read data from files
     averages,params = read_average_file(args.average)
-
     #extract the relevant lines to work with
     index_1 = args.test_1
     index_2 = args.test_2
+    print("index1: ",index_1," index2: ",index_2)
     try:
-        #convert string to float
         test_1 = [float(i) for i in averages[index_1]]
         test_2 = [float(i) for i in averages[index_2]]
         params_1 = [float(i) for i in params[index_1]]
         params_2 = [float(i) for i in params[index_2]]
+        # while i < len(averages):
+        #     test_1.append(float(averages[index_1][i]))
+        #     test_2.append(float(averages[index_2][i]))
+        #     i+=1
+        # i=0
+        # while i < len(params):
+        #     params_1.append(float(params[index_1][i]))
+        #     params_2.append(float(params[index_2][i]))
+        #     i+=1
     except IndexError:
-        print("Indices out of range.")
+        print(f"Index {i} out of range.")
         return
 
     #calculate performance comparisons
@@ -446,12 +472,14 @@ def evaluate_adjustments():
             #significant improvement in performance
             performance = 1
 
-    #find the index of the parameter that was updated
-    i = 0
-    while i < len(params_1):
-        if(not f_equals(params_1[i],params_2[i])):
-            break
-        i += 1
+    #whether to use the given parameter number or search for it ourselves
+    if(param_number == -1):
+        #find the index of the parameter that was updated
+        param_number = 0
+        while param_number < len(params_1):
+            if(not f_equals(params_1[param_number],params_2[param_number])):
+                break
+            param_number += 1
 
     #arguments that we will pass in to the handle_direction function
     direction = 4
@@ -484,16 +512,14 @@ def evaluate_adjustments():
     elif(midpoint == -1):
         #No midpoint provided, so simply compare the two tests
         if(performance == 1):
-            #performance has improved (test 1 is better than test 2)
-            if(streak > 0):
-                #on a streak so keep doubling/halving
-                direction = 3 if params_1[i] > params_2[i] else -3
-                #always double/halve the newer test parameters
-                main_params = params_1
-                streak += 1
-            else:
-                print("Why are you here if you're not on a streak?")
-                return
+            #on a streak so keep doubling/halving
+            direction = 3 if params_1[param_number] > params_2[param_number] else -3
+            #always double/halve the newer test parameters
+            main_params = params_1
+            streak += 1
+            # else:
+            #     print("Why are you here if you're not on a streak?")
+            #     return
         elif(performance == -1 or performance == 0):
             #check the midpoint of new and old
             direction = -4
@@ -517,22 +543,29 @@ def evaluate_adjustments():
         print("main_params is None!")
         return
 
+    print(f"Taking direction: {direction}")
     #make adjustments to parameter values and return them
-    final_value,final_params,stop_test = handle_direction(direction,i,main_params,second_params)
+    final_value,final_params,stop_test = handle_direction(direction,param_number,main_params,second_params)
 
     #take the path to the averages file and replace it with a different filename
-    output_profile = output_stop_test = output_evaluate_params = args.average.split("/")[:-1]
+    output_profile = args.average.split("/")[:-1]
+    output_stop_test = args.average.split("/")[:-1]
+    output_evaluate_params = args.average.split("/")[:-1]
     output_profile.append("new.profile")
     output_stop_test.append("stop.test")
     output_evaluate_params.append("evaluate.parameters")
-    #write values to the evaluate_params list and
+
+    #evaluate params contains the arguments to be passed to the next call to evaluate
     #data stored in format: test_1, test_2, streak, num_worse, w_limit, s_limit, midpoint
     if direction in ONE_DATASET:
         #no midpoint but next test is the new test_1
-        evaluate_params = [index_1+1,index_1,streak,num_worse,w_limit,s_limit]
+        evaluate_params = [args.average,'-p '+str(param_number),str(index_1+1),str(index_1),str(streak),str(num_worse),'-w '+str(w_limit),'-s '+str(s_limit)]
     elif direction in TWO_DATASETS:
-        #midpoint is the next test
-        evaluate_params = [index_1,index_2,streak,num_worse,w_limit,s_limit,index_1+1]
+        #first time taking a midpoint so reuse the current test indices. Else, increment them
+        if(midpoint == -1):
+            evaluate_params = [args.average,'-p '+str(param_number),str(index_1),str(index_2),str(streak),str(num_worse),'-w '+str(w_limit),'-s '+str(s_limit),'-m '+str(index_1+1)]
+        else:
+            evaluate_params = [args.average,'-p '+str(param_number),str(midpoint),str(index_1),str(streak),str(num_worse),'-w '+str(w_limit),'-s '+str(s_limit),'-m '+str(midpoint+1)]
     else:
         print("Hmmm something wrong with direction")
     output_filename = "/".join(output_profile)
@@ -542,15 +575,14 @@ def evaluate_adjustments():
     #write new parameters to the file
     write_param_values(output_filename,final_params)
     write_line(output_stop_filename,stop_test)
-    write_line(output_evaluate_filename,", ".join(evaluate_params))
-
+    write_line(output_evaluate_filename," ".join(evaluate_params))
 
     print("\n====================================================================================================")
     print(f"Test 1 averages: {test_1} Parameters used: {params_1}")
     print(f"Test 2 averages: {test_2} Parameters used: {params_2}")
     print(f"Absolute differences: {diffs}")
     print(f"Percentage differences: {percent_diffs}")
-    print(f"Changed parameter '{OPTIONS[i]}' to: {final_value}. test 1: {params_1[i]}, test 2: {params_2[i]}")
+    print(f"Changed parameter '{OPTIONS[param_number]}' to: {final_value}. test 1: {params_1[param_number]}, test 2: {params_2[param_number]}")
     print(f"New parameters: {final_params}")
     print("====================================================================================================\n")
 
@@ -565,22 +597,32 @@ def adjust_warnings():
     parser = argparse.ArgumentParser()
     parser.add_argument('warnings',help='Path to the warning_{test_number}.txt file that contains warnings for a test')
     parser.add_argument('parameters',help='Path to the .profile/stderr output file that contains the parameter values for a test')
-    parser.add_argument('-x',action='store_false',help='Whether or not the parameter file is a .profile file or not. Default is True')
-    parser.add_argument('-o',action='store_false',help='Whether or not to update only one or several parameters at once. Default is True')
+    parser.add_argument('-x',action='store_false',default=True,help='Whether or not the parameter file is a .profile file or not. Default is True')
+    parser.add_argument('-o',action='store_false',default=True,help='Whether or not to update only one or several parameters at once. Default is True')
+    parser.add_argument('-n',action='store_true',help='Whether or not to save the parameters found in the stderr file to a new .profile file. Default is False')
     args = parser.parse_args(sys.argv[2:])
     warning_file = args.warnings
     param_file = args.parameters
     profile = args.x
     one_update = args.o
+    new_profile = args.n
+
+    if(new_profile and profile):
+        print("Please only use the -n flag with the -x flag")
+        return
+
     #read and parse data
     FILE = open_file(warning_file,"r")
     data = FILE.readlines()
-    #if there were no warnings:
-    if(len(data) > 1 and data[0] == "No warnings."):
-        print("No warnings found.")
-        return None
     FILE.close()
-    tokenized_data = [line.split(" ")[1:] for line in data]
+
+
+    #Make a name for the new parameter file
+    new_param_file = param_file
+    if(param_file.split(".")[1] != "profile"):
+        #we have read data from the result file so create a profile and store it there
+        new_param_file = "/".join(param_file.split("/")[:-2]) +  "/test_" + param_file.split("/")[0] + ".profile"
+
     #whether or not the parameter in this position has been modified already
     parameter_modified = [False for i in range(NUM_PARAMETERS)]
 
@@ -588,13 +630,23 @@ def adjust_warnings():
     parameter_values = []
     old_parameter_values = None
     if(profile == False):
+        #.profile file doesn't exist so create one if necessary
         parameter_values = read_result_file(param_file)
+        if(new_profile == True):
+            write_param_values(new_param_file,parameter_values)
     else:
         #use profile values
         parameter_values = read_profile_file(param_file)
         if(os.path.isfile(param_file + ".old")):
             #read values from the old parameter file as well so that we have upper/lower bounds for binary search
             old_parameter_values = read_profile_file(param_file + ".old")
+
+    #if there were no warnings, no need to proceed
+    if(len(data) > 1 and data[0] == "No warnings."):
+        print("No warnings found.")
+        return
+    tokenized_data = [line.split(" ")[1:] for line in data]
+
     if(parameter_values is None):
         print("Failed to parse parameter file. Have a nice day.")
         return
@@ -603,13 +655,8 @@ def adjust_warnings():
         print(f"Something went wrong with reading {param_file}. Not enough parameters read.")
         return
 
-    #write old parameters to new file. allows upper and lower bounds for binary search
-    if(param_file.split(".")[1] != "profile"):
-        #we have read data from the result file so create a profile and store it there
-        param_file = "/".join(param_file.split("/")[:-2]) +  "/test_" + param_file.split("/")[0] + ".profile"
-
     #save old values before continuing
-    old_param_file = param_file + ".old"
+    old_param_file = new_param_file + ".old"
     write_param_values(old_param_file,parameter_values)
 
     #automatically adjust -B option to specified limit
@@ -639,10 +686,9 @@ def adjust_warnings():
         modified = modified or i
     if(not modified):
         print("No parameters modified.")
-        return(parameter_values)
     #write new parameter values to the same parameter file
-    write_param_values(param_file,parameter_values)
-    print("New values: ",parameter_values,"stored in ",param_file)
+    write_param_values(new_param_file,parameter_values)
+    print("New values: ",parameter_values,"stored in ",new_param_file)
     return(parameter_values)
 
 """
@@ -656,13 +702,16 @@ def modify_parameter():
     #parse arguments for the function
     parser = argparse.ArgumentParser()
     parser.add_argument('profile',help='Path to the .profile file that contains the parameter values to be changed')
+    parser.add_argument('--new','-n',default=None,help='Optional path to the name of the file that will store the new parameter values')
     parser.add_argument('--old','-o',default=None,help='Optional path to the name for the file that will store the current parameter values specified by [profile file]')
     parser.add_argument('parameter_number',type=int,help='The number of the parameter to be modified. MAX_LF,AVG_EPK,MAX_EPK,K,B,T,ULTRA_THRESH are represented by 0-6 respectively')
     parser.add_argument('--scale_factor','-s',type=float,default=0.0,help='The factor to multiply with the current value of the specified parameter')
     parser.add_argument('--value','-v',type=float,default=0.0,help='The value to assign to the specified parameter. Overrides effect of --scale-factor')
     args = parser.parse_args(sys.argv[2:])
+
     #read data from files
     current_params = read_profile_file(args.profile)
+
     #sanity checks
     if (args.parameter_number < 0 or args.parameter_number > NUM_PARAMETERS):
         print(f"Parameter number {args.parameter_number} out of range.")
@@ -673,14 +722,16 @@ def modify_parameter():
     if args.value < 0:
         print(f"Parameter number {args.value} out of range.")
         return None
+
     #default behaviour if no output file for the old values is specified
     if args.old is None:
         write_param_values(args.profile + ".old",current_params)
     else:
         write_param_values(args.old,current_params)
+
     #retrieve the desired value and modify it
     old_value = current_params[args.parameter_number]
-    print("Old: ",old_value)
+
     #modify parameter value based on args provided
     if(args.value > 0):
         new_value = args.value
@@ -690,26 +741,54 @@ def modify_parameter():
         print("Please set one of the -s or -v flags.")
         return None
     current_params[args.parameter_number] = new_value
-    write_param_values(args.profile,current_params)
-    print("New: ",new_value)
+    if(args.new is None):
+        write_param_values(args.profile,current_params)
+    else:
+        write_param_values(args.new,current_params)
+    print(f"Parameter {OPTIONS[args.parameter_number]} modified. Old: {old_value}, New: {new_value}")
     return new_value
 
 """
-midpoint()
-============================================================================================================================================
-Take the midpoint of two parameter values or go in the best direction and create a new .profile file that uses the midpoint as the new value
+choose()
+=======================================================================================
+Select the parameter values with the best average runtime and save that in best.profile
 """
 
-def midpoint():
+def choose():
     #parse arguments for the function
     parser = argparse.ArgumentParser()
-    parser.add_argument('parameters',help='Path to the parameters.txt file that contains the parameter values for each test')
-    parser.add_argument('test_1',type=int,help='Line number of the more recent test in the averages.txt file to compare with a previous test')
-    parser.add_argument('test_2',type=int,help='Line number of a previous test in the averages.txt to be compared against')
-    parser.add_argument('--midpoint','-m',type=int,help='Line number of the test in which a midpoint was taken between test_1 and test_2')
+    parser.add_argument('results',help='Subset of the averages.txt file from which we wish to select the best performing set of parameters')
     args = parser.parse_args(sys.argv[2:])
-    print("I don't do anything yet :(")
-    return
+    averages,params = read_average_file(args.results)
+
+    #error check
+    if(averages is None or params is None):
+        print("Something wrong with your results file.")
+        return
+    best = 9999999
+    best_index = -1
+
+    #get index of the best test in the set
+    try:
+        for i in range(len(averages)):
+            result = averages[i]
+            align_time = float(result[0])
+            #better than the current one
+            if align_time < best:
+                best = align_time
+                best_index = i
+        #get the parameters for the best performing test and save them
+        best_params = [float(i) for i in params[best_index]]
+    except ValueError:
+        print("Could not convert string to float.")
+    except IndexError:
+        print("Indices out of for choose.")
+
+    #write new parameters to file
+    param_file = "/".join(args.results.split("/")[:-1]) + "/best.profile"
+    write_param_values(param_file,best_params)
+
+    print(f"Best test: {best_index}, Parameters: {params[best_index]}")
 
 """
 main
@@ -727,14 +806,16 @@ parser = argparse.ArgumentParser(
             'warning' :            (for adjusting algorithm parameters based on warning messages from f5c)
             'evaluate':            (for evaluating whether a change in parameter led to better or worse performance)
             'modify'  :            (for directly modifying the value of a given parameter)
-            'midpoint':            (for taking the midpoint between a given set of parameters)
+            'choose':              (for selecting the test with the best average performance and storing its parameters)
 
     usage:
+            'make_profile'
             'average [result file]'
                 [result file] :        (path to parameters.txt file generated by param_test.sh)
 
             'evaluate [average file] [test 1] [test 2] [streak] [num_worse] (-w [w_limit] -s [s_limit] -m [midpoint])'
-                [average file] :       (evaluate mode only. path to averages.txt file to compare output from)
+                [average file] :       (path to averages.txt file to compare output from)
+                [parameter] :          (number of the parameter that is being tuned)
                 [test 1] :             (line number of more recent test in the average file to compare with a previous test)
                 [test 2] :             (line number of previous test in the average file to be compared against)
                 [streak] :             (how many doubles/halves we have done in a row)
@@ -748,19 +829,18 @@ parser = argparse.ArgumentParser(
                 [parameter file] :     (path to .profile (or f5c stderr output file in warning mode) that lists parameters used in the test)
                 '-x' :                 (optional boolean flag to specify whether using a .profile file or not. default is True)
                 '-o' :                 (optional boolean flag to specify whether to only update one parameter or not. default is True)
+                '-n' :                 (whether or not to save the parameters found in the stderr file to a new .profile file. default is False)
 
             'modify [profile file] (-o [old profile]) [parameter number] [direction] (-s [scale factor]/-v [value]):
                 [profile file] :       (path to the .profile file that contains the parameter values to be changed)
+                '-n [new profile] :    (optional path to the name for the file that will store the new parameters)'
                 '-o [old profile]' :   (optional path to the name for the file that will store the current parameter values specified by [profile file])
                 [parameter number] :   (the number of the parameter to be modified)
                 '-s [scale factor]' :  (optional factor to multiply with the current value of the specified parameter)
                 '-v [value]' :         (optional value to assign to the specified parameter. overrides effect of --scale-factor)
 
-            'midpoint [parameters] [test_1] [test_2] (-m [midpoint])'
-                [parameters]
-                [test_1]
-                [test_2]
-                '-m [midpoint]'
+            'choose [results]'
+                [results] :            (path to the file containing the subset of the averages.txt file which we will be searching)
             '''
 )
 
@@ -777,7 +857,7 @@ elif(args.mode == 'warning'):
     adjust_warnings()
 elif(args.mode == 'modify'):
     modify_parameter()
-elif(args.mode == 'midpoint'):
-    midpoint()
+elif(args.mode == 'choose'):
+    choose()
 else:
     parser.print_usage()

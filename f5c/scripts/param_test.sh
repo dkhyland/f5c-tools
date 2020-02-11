@@ -16,8 +16,8 @@ resultdir=../results
 numruns=1
 
 #GPU parameters
-batchsize=256
-max_bases=2M
+batchsize=1024
+max_bases=5200000
 max_lf=3.0
 avg_epk=2.0
 max_epk=5.0
@@ -87,8 +87,8 @@ mode_test() {
 	case $1 in
 		valgrind) valgrind $cmd > /dev/null;;
 		gdb) gdb --args "$cmd";;
-		cpu) $cmd --disable-cuda=yes 2>&1 >"${testdir}/${dataset}/result.txt" > "${run_folder}/raw_${run_number}.txt";;
-		cuda) $cmd --disable-cuda=no 2>&1 >"${testdir}/${dataset}/result.txt" > "${run_folder}/raw_${run_number}.txt";;
+		cpu) $cmd --disable-cuda=yes >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt";;
+		cuda) $cmd --disable-cuda=no >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt";;
 		# echo) echo "$cmd -t $threads > ${testdir}/result.txt";;
 		# nvprof) nvprof  -f --analysis-metrics -o profile.nvprof "$cmd" --disable-cuda=no --debug-break=5 > /dev/null;;
 		# custom) shift; $cmd "$@" > ${testdir}/result.txt; execute_test;;
@@ -102,8 +102,8 @@ help_msg() {
 	echo
 	echo "mode                 one of:valgrind/gdb/cpu/cuda"
 	echo
-	echo "-d [test data dir]   Directory where test data is located."
-	echo "-D [dataset]   	   Name of dataset to be used."
+	echo "-d [test data dir]   Directory where test data is located. Default is ../data"
+	echo "-D [dataset]   	   Name of dataset to be used. Default is LIGATIONFAB42804"
 	echo "-b [bam file]        Same as f5c -b."
 	echo "-r [read file]       Same as f5c -r."
 	echo "-g [ref genome]      Same as f5c -g."
@@ -205,7 +205,7 @@ do
 		if [ -z ${profile} ]; then
 			${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} --cuda-max-lf ${max_lf} --cuda-avg-epk ${avg_epk} --cuda-max-epk ${max_epk} -K ${batchsize} -B ${max_bases} -t ${threads} --ultra-thresh ${ultra_thresh} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
 		else
-			${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile} 2>&1 >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
+			${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
 		fi
 	else
 		mode_test "$@"
@@ -224,7 +224,7 @@ do
 	cat "${run_folder}/raw_${run_number}.txt" | grep 'Real time:' | grep -o -P '(?<=Real time: ).*(?= sec; CPU)' >> "${resultdir}/${dataset}/parameters.txt"
 
 	#warnings for parameter tuning
-	cat "${run_folder}/useful_${run_number}.txt" | grep '::INFO' > "${run_folder}/warning_${run_number}.txt" || echo "No warnings." > "${run_folder}/warning_${run_number}.txt"
+	cat "${run_folder}/useful_${run_number}.txt" | grep '::INFO' | grep -v 'Performance bounded by file I/O' > "${run_folder}/warning_${run_number}.txt" || echo "No warnings." > "${run_folder}/warning_${run_number}.txt"
 
 	#summary of test results
 	tail -n 24 "${run_folder}/raw_${run_number}.txt" > "${run_folder}/summary_${run_number}.txt" || echo "Failed to create summary" > "${run_folder}/summary_${run_number}.txt"
