@@ -1,0 +1,5 @@
+*.o
+data/*
+results/*
+f5c/f5c
+f5c/test/*

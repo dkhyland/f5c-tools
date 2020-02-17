@@ -169,7 +169,7 @@ def handle_direction(direction,param_index,main_params,second_params):
         final_value = main_value
         stop_test = True
     else:
-        print(f"Invalid direction: {direction}")
+        print("Invalid direction: {}".format(direction))
 
     #edit the value in the list and return it
     final_params = [i for i in main_params]
@@ -188,7 +188,7 @@ def open_file(filename,mode):
     try:
         FILE = open(filename,mode)
     except FileNotFoundError:
-        print(f"File {filename} not found")
+        print("File {} not found".format(filename))
         sys.exit()
     return FILE
 
@@ -202,7 +202,7 @@ def read_result_file(filename):
 
     #error checking
     if(len(test_data) < 1):
-        print(f"{filename} does not have enough data or profile variable should be true")
+        print("{} does not have enough data or profile variable should be true".format(filename))
         return
 
     for i in range(len(test_data)-1,len(test_data)-5,-1):
@@ -216,7 +216,7 @@ def read_result_file(filename):
         try:
             parameter_values.append(float(test_data[1]))
         except ValueError:
-            print(f"Could not convert parameter data from {filename}.")
+            print("Could not convert parameter data from {}.".format(filename))
             return
     return parameter_values
 
@@ -236,7 +236,7 @@ def read_profile_file(filename):
             if( i != "" ):
                 parameter_values.append(float(i))
     except ValueError:
-        print(f"Could not convert data from {filename} to float.")
+        print("Could not convert data from {} to float.".format(filename))
         return
     return parameter_values
 
@@ -256,7 +256,7 @@ def read_average_file(filename):
     AVE_FILE = open_file(filename,"r")
     line = AVE_FILE.readline()
     if(line == ""):
-        print(f"{filename} is empty!")
+        print("{} is empty!".format(filename))
         return averages
     #split the line by colons
     line_parts = line.strip().split(": ")
@@ -275,13 +275,13 @@ def read_average_file(filename):
 
 def write_average_values(filename,average_values,group_params):
     if(len(average_values) != len(group_params)):
-        print(f"Length of average_values ({len(average_values)}) and group_params ({len(group_params)}) don't match!")
+        print("Length of average_values ({}) and group_params ({}) don't match!".format(len(average_values),len(group_params)))
         return
     AVE_FILE = open_file(filename,"w")
     i = 0
     for j in range(len(average_values)):
         result = average_values[i]
-        AVE_FILE.write(f"{i}: ")
+        AVE_FILE.write("{}: ".format(i))
         AVE_FILE.write(" ".join(["{0:.2f}".format(i) for i in result]))
         AVE_FILE.write(": ")
         AVE_FILE.write(" ".join(["{0:.2f}".format(i) for i in group_params[i]]))
@@ -454,7 +454,7 @@ def evaluate_adjustments():
         #     params_2.append(float(params[index_2][i]))
         #     i+=1
     except IndexError:
-        print(f"Index {i} out of range.")
+        print("Index {} out of range.".format(i))
         return
 
     #calculate performance comparisons
@@ -543,7 +543,7 @@ def evaluate_adjustments():
         print("main_params is None!")
         return
 
-    print(f"Taking direction: {direction}")
+    print("Taking direction: {}".format(direction))
     #make adjustments to parameter values and return them
     final_value,final_params,stop_test = handle_direction(direction,param_number,main_params,second_params)
 
@@ -578,12 +578,12 @@ def evaluate_adjustments():
     write_line(output_evaluate_filename," ".join(evaluate_params))
 
     print("\n====================================================================================================")
-    print(f"Test 1 averages: {test_1} Parameters used: {params_1}")
-    print(f"Test 2 averages: {test_2} Parameters used: {params_2}")
-    print(f"Absolute differences: {diffs}")
-    print(f"Percentage differences: {percent_diffs}")
-    print(f"Changed parameter '{OPTIONS[param_number]}' to: {final_value}. test 1: {params_1[param_number]}, test 2: {params_2[param_number]}")
-    print(f"New parameters: {final_params}")
+    print("Test 1 averages: {} Parameters used: {}".format(test_1,params_1))
+    print("Test 2 averages: {} Parameters used: {}".format(test_2,params_2))
+    print("Absolute differences: {}".format(diffs))
+    print("Percentage differences: {}".format(percent_diffs))
+    print("Changed parameter '{}' to: {}. test 1: {}, test 2: {}".format(OPTIONS[param_number],final_value,params_1[param_number],params_2[param_number]))
+    print("New parameters: {}".format(final_params))
     print("====================================================================================================\n")
 
 """
@@ -652,7 +652,7 @@ def adjust_warnings():
         return
 
     if(len(parameter_values) < NUM_PARAMETERS):
-        print(f"Something went wrong with reading {param_file}. Not enough parameters read.")
+        print("Something went wrong with reading {}. Not enough parameters read.".format(param_file))
         return
 
     #save old values before continuing
@@ -714,13 +714,13 @@ def modify_parameter():
 
     #sanity checks
     if (args.parameter_number < 0 or args.parameter_number > NUM_PARAMETERS):
-        print(f"Parameter number {args.parameter_number} out of range.")
+        print("Parameter number {} out of range.".format(args.parameter_number))
         return None
     if args.scale_factor < 0:
-        print(f"Parameter number {args.scale_factor} out of range.")
+        print("Parameter number {} out of range.".format(args.scale_factor))
         return None
     if args.value < 0:
-        print(f"Parameter number {args.value} out of range.")
+        print("Parameter number {} out of range.".format(args.value))
         return None
 
     #default behaviour if no output file for the old values is specified
@@ -745,7 +745,7 @@ def modify_parameter():
         write_param_values(args.profile,current_params)
     else:
         write_param_values(args.new,current_params)
-    print(f"Parameter {OPTIONS[args.parameter_number]} modified. Old: {old_value}, New: {new_value}")
+    print("Parameter {} modified. Old: {}, New: {}".format(OPTIONS[args.parameter_number],old_value,new_value))
     return new_value
 
 """
@@ -788,7 +788,7 @@ def choose():
     param_file = "/".join(args.results.split("/")[:-1]) + "/best.profile"
     write_param_values(param_file,best_params)
 
-    print(f"Best test: {best_index}, Parameters: {params[best_index]}")
+    print("Best test: {}, Parameters: {}".format(best_index,params[best_index]))
 
 """
 main

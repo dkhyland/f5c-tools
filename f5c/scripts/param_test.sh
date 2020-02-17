@@ -2,9 +2,6 @@
 
 #Run script from f5c directory. f5c, results, and data folders should all be located in the same directory
 
-# exit when command fails
-set -e
-
 # defaults
 exepath=./f5c
 testdir=../data
@@ -16,7 +13,7 @@ resultdir=../results
 numruns=1
 
 #GPU parameters
-batchsize=1024
+batchsize=256
 max_bases=5200000
 max_lf=3.0
 avg_epk=2.0
@@ -81,7 +78,7 @@ mode_test() {
 	if [ -z ${profile} ]; then
 		cmd="${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} --cuda-max-lf ${max_lf} --cuda-avg-epk ${avg_epk} --cuda-max-epk ${max_epk} -K ${batchsize} -B ${max_bases} -t ${threads} --ultra-thresh ${ultra_thresh}"
 	else
-		cmd="${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile} --cuda-max-lf ${max_lf} --cuda-avg-epk ${avg_epk} --cuda-max-epk ${max_epk} -K ${batchsize} -B ${max_bases} -t ${threads} --ultra-thresh ${ultra_thresh}"
+		cmd="${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile}"
 	fi
 
 	case $1 in
@@ -205,10 +202,18 @@ do
 		if [ -z ${profile} ]; then
 			${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} --cuda-max-lf ${max_lf} --cuda-avg-epk ${avg_epk} --cuda-max-epk ${max_epk} -K ${batchsize} -B ${max_bases} -t ${threads} --ultra-thresh ${ultra_thresh} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
 		else
-			${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
+			if [ ${max_bases} -eq 5200000 ]; then
+				${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
+			else
+				${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile} -B ${max_bases} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
+			fi
 		fi
 	else
 		mode_test "$@"
+	fi
+
+	if [ $? -eq 1 ]; then
+		die "METHYLATION CALLING FAILED"
 	fi
 
 	#extract data

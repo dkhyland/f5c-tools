@@ -31,10 +31,16 @@ NUM_PARAMETERS=7
 binary_only=0
 #flag for whether to skip the warning step or not
 skip_warnings=0
+#fix max_bases
+max_bases=0
 
 run_test() {
     cd ${exedir}
-    scripts/param_test.sh -D ${dataset} -n ${num_runs} -x ${1}
+    if [ $max_bases -eq 0 ]; then
+        scripts/param_test.sh -D ${dataset} -n ${num_runs} -x ${1}
+    else
+        scripts/param_test.sh -D ${dataset} -n ${num_runs} -x ${1} -B ${max_bases}
+    fi
     run_number=$((${run_number} + ${num_runs}))
     test_number=$((${test_number} + 1))
 }
@@ -42,7 +48,11 @@ run_test() {
 #first run: default settings and no profile
 first_run() {
     cd ${exedir}
-    scripts/param_test.sh -D ${dataset} -n ${num_runs}
+    if [ $max_bases -eq 0 ]; then
+        scripts/param_test.sh -D ${dataset} -n ${num_runs}
+    else
+        scripts/param_test.sh -D ${dataset} -n ${num_runs} -B ${max_bases}
+    fi
     run_number=$((${run_number} + ${num_runs}))
     test_number=$((${test_number} + 1))
     cd ${resultdir}
@@ -115,7 +125,7 @@ help_msg() {
 }
 
 # parse options
-while getopts t:d:r:n:bwh opt
+while getopts t:d:r:n:B:bwh opt
 do
 	case $opt in
 		t) testdir="$OPTARG";;
@@ -124,6 +134,7 @@ do
         n) num_runs=$((${OPTARG}));;
         b) binary_only=1;;
         w) skip_warnings=1;;
+        B) max_bases=$((${OPTARG}));;
 		h) help_msg
 		   exit 0;;
 		?) printf "Usage: %s args\n" "$0"
@@ -182,7 +193,8 @@ echo 'Doing divide and conquer'
 echo
 
 #tune each parameter by applying the divide and conquer approach
-for i in $(seq 0 $((${NUM_PARAMETERS} - 1))); do
+# for i in $(seq 0 $((${NUM_PARAMETERS} - 1))); do
+for i in 0 1 2 3 5 6; do
     #run with the original parameter value before changing
     if [ ${i} -gt 0 ]; then
         run_test "${resultdata}/test_${dataset}.profile"
