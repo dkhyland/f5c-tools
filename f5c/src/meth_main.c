@@ -223,7 +223,11 @@ int meth_main(int argc, char* argv[], int8_t mode) {
             fastafile = optarg;
         } else if (c == 'x') {  //CHANGE: Set profile values. Any user-specified arguments will override the profile values.
             profilename = optarg;
-            set_profile(profilename,&opt);
+            int profile_return = set_profile(profilename,&opt);
+            if(profile_return == 1){
+                ERROR("%s","Error occurred setting the profile.");
+                exit(EXIT_FAILURE);
+            }
         } else if (c == 'B') {
             opt.batch_size_bases = mm_parse_num(optarg);
             if(opt.batch_size_bases<=0){

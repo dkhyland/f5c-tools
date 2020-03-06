@@ -1726,7 +1726,7 @@ void set_profile(char *profile, opt_t *opt){
     float cuda_max_readlen,cuda_avg_events_per_kmer,cuda_max_avg_events_per_kmer;
     if(fptr == NULL){
         fprintf(stderr,"File not found\n");
-        return;
+        return 1;
     }
     
     //read file and set parameter values
@@ -1736,10 +1736,12 @@ void set_profile(char *profile, opt_t *opt){
 
     if(result < 7){
         fprintf(stderr,"Error reading config file.\n");
-        return;
+        return 1;
     }
 
     set_opts(opt,batch_size,batch_size_bases,num_thread,ultra_thresh,cuda_max_readlen,cuda_avg_events_per_kmer,cuda_max_avg_events_per_kmer);
+
+    return 0;
 
     /*Loading preset values
     if(strcmp(profile,"example1") == 0){
