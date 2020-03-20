@@ -1,7 +1,6 @@
 # f5c-tools
 
-This repository contains f5c forked from Hasindu Gamaarachchi's repo https://github.com/hasindu2008/f5c and a tool that may be used to tune the GPU parameters on a given machine. 
-After this, run the scripts with the -h flag for further instruction on usage.
+This repository contains f5c forked from Hasindu Gamaarachchi's repo https://github.com/hasindu2008/f5c and a tool that may be used to tune the GPU parameters on a given machine.
 
 ## Usage
 1. Clone the repository
