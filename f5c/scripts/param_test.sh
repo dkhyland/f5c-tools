@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 #Run script from f5c directory. f5c, results, and data folders should all be located in the same directory
 
@@ -11,10 +11,12 @@ ref=${testdir}/humangenome.fa
 reads=${testdir}/${dataset}/${dataset}.fastq
 resultdir=../results
 numruns=1
+override_B=0
+override_K=0
 
 #GPU parameters
 batchsize=256
-max_bases=5200000
+max_bases=2000000
 max_lf=3.0
 avg_epk=2.0
 max_epk=5.0
@@ -41,13 +43,54 @@ profile=
 # terminate script
 die() {
 	echo "$1" >&2
-	echo
 	exit 1
 }
 
 clear_fscache() {
 	sync
 	echo 3 | tee /proc/sys/vm/drop_caches
+}
+
+#checks the output of f5c and the return code from calling f5c and removes all the runs related to this test if there was an error
+check_failed() {
+	#grep for the last line of f5c if it successfully runs
+	check_output=$(cat ${1} | grep "Real time:")
+	error_message=$(tail -n 1 ${1})
+	echo "check: ${check_output}, err: ${error_message}"
+	echo
+	#check for common error messages
+	if [[ -z ${check_output} || ! -z $(echo ${error_message} | grep "Killed") || ! -z $(echo ${error_message} | grep "Segmentation fault") || ! -z $(echo ${error_message} | grep "meth_main::ERROR") ]]; then
+		# output the raw data to a crash_output.txt file
+		cat ${1} > "${resultdir}/${dataset}/crash_output.txt"
+
+		#debug
+		# echo "Removing ${2} rounds."
+		# echo "Run.config and parameters.txt before:"
+		# cat "${resultdir}/${dataset}/run.config"
+		# cat "${resultdir}/${dataset}/parameters.txt"
+
+		# remove all the previous successful tests for this round
+		for j in $( seq 1 $((${2} - 1)) ); do
+			scripts/remove_test.sh -d ${dataset}
+		done
+
+		#read and update the run number
+		run_number=$( cat "${resultdir}/${dataset}/run.config" )
+		run_number=$((${run_number} - ${2}))
+		#don't output values lower than 0
+		config_number=${run_number}
+		if [ ${run_number} -lt -1 ]; then
+			config_number=-1
+		fi
+		echo $config_number >  "${resultdir}/${dataset}/run.config"
+
+		#debug
+		# echo "Run.config and parameters.txt after:"
+		# cat "${resultdir}/${dataset}/run.config"
+		# cat "${resultdir}/${dataset}/parameters.txt"
+		# echo
+		exit $2
+	fi
 }
 
 # download test set given url
@@ -84,8 +127,8 @@ mode_test() {
 	case $1 in
 		valgrind) valgrind $cmd > /dev/null;;
 		gdb) gdb --args "$cmd";;
-		cpu) $cmd --disable-cuda=yes >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt";;
-		cuda) $cmd --disable-cuda=no >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt";;
+		cpu) $cmd --disable-cuda=yes;;
+		cuda) $cmd --disable-cuda=no;;
 		# echo) echo "$cmd -t $threads > ${testdir}/result.txt";;
 		# nvprof) nvprof  -f --analysis-metrics -o profile.nvprof "$cmd" --disable-cuda=no --debug-break=5 > /dev/null;;
 		# custom) shift; $cmd "$@" > ${testdir}/result.txt; execute_test;;
@@ -113,13 +156,15 @@ help_msg() {
 	echo "-t [n]               Same as f5c -t (number of threads)."
 	echo "-u [n]			   Same as f5c --ultra-thresh (threshold for skipping ultra long reads)."
 	echo "-n [n]			   Number of times to run f5c with the given parameters"
+	echo "-0				   Override flag for K"
+	echo "-1				   Override flag for B"
 	# echo "-d                   Download chr22_meth_example data set and exit."
 	echo "-i 		   		   Index the dataset."
 	echo "-h                   Show this help message."
 }
 
 # parse options
-while getopts d:D:b:g:r:x:l:a:m:K:B:t:u:n:ih opt
+while getopts d:D:b:g:r:x:l:a:m:K:B:t:u:n:ih01 opt
 do
 	case $opt in
 		d) testdir="$OPTARG";;
@@ -144,6 +189,8 @@ do
 		#    fallback_url="https://ndownloader.figshare.com/files/13784792?private_link=5dd2077f1041412a9518";;
 		# d) download_test_set "http://genome.cse.unsw.edu.au/tmp/f5c_na12878_test.tgz" "https://ndownloader.figshare.com/files/13784792?private_link=5dd2077f1041412a9518"
 		#    exit 0;;
+		0) override_K=1;;
+		1) override_B=1;;
 		h) help_msg
 		   exit 0;;
 		i) index=1;;
@@ -179,7 +226,7 @@ fi
 #file to keep track of current run number
 [ -f "${resultdir}/${dataset}/run.config" ] || echo -1 > "${resultdir}/${dataset}/run.config"
 
-for i in $( seq 1 ${numruns});
+for i in $( seq 1 ${numruns} );
 do
 	#read and update the run number
 	run_number=$( cat "${resultdir}/${dataset}/run.config" )
@@ -187,37 +234,57 @@ do
 	echo $run_number >  "${resultdir}/${dataset}/run.config"
 
 	#make directory for the current test
-	mkdir "${resultdir}/${dataset}/${run_number}" || echo "Test directory ${resultdir}/${dataset}/${run_number} already exists. Data may be overwritten."
+	if [ ! -d "${resultdir}/${dataset}/${run_number}" ]; then
+		mkdir "${resultdir}/${dataset}/${run_number}"
+	fi
 	run_folder="${resultdir}/${dataset}/${run_number}"
 
-	#runs if user specified -i
+	#runs if user specified -i flag
 	if [ ${index} -eq 1 ] && [ ${i} -eq 1 ]; then
-		echo "\nIndexing...\n"
+		echo
+		echo "Indexing..."
+		echo
 		${exepath} index -d ${testdir}/${dataset}/fast5 ${reads}
 	fi
 
-	echo "\nMethylation calling...\n"
-	#where f5c is called
+	echo
+	echo "Methylation calling..."
+	echo
+
+	#variable for storing the execution result of f5c in case it crashes
+	exe_result=0
+
+	#set the command to be run
 	if [ -z "$mode" ]; then
-		if [ -z ${profile} ]; then
-			${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} --cuda-max-lf ${max_lf} --cuda-avg-epk ${avg_epk} --cuda-max-epk ${max_epk} -K ${batchsize} -B ${max_bases} -t ${threads} --ultra-thresh ${ultra_thresh} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
+		if [ -z "${profile}" ]; then
+			#create .profile file if one is not specified
+			echo "${max_lf} ${avg_epk} ${max_epk} ${batchsize} ${max_bases} ${threads} ${ultra_thresh}" > "${resultdir}/${dataset}/test_${dataset}.profile"
+			cat "${resultdir}/${dataset}/test_${dataset}.profile"
+			command="${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} --cuda-max-lf ${max_lf} --cuda-avg-epk ${avg_epk} --cuda-max-epk ${max_epk} -K ${batchsize} -B ${max_bases} -t ${threads} --ultra-thresh ${ultra_thresh}"
 		else
-			if [ ${max_bases} -eq 5200000 ]; then
-				${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
-			else
-				${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile} -B ${max_bases} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
+			command="${exepath} call-methylation -b ${bamfile} -g ${ref} -r ${reads} -x ${profile}"
+			if [ ${override_B} -eq 1 ]; then
+				command="${command} -B ${max_bases}"
+			fi
+
+			if [ ${override_K} -eq 1 ]; then
+				command="${command} -K ${batchsize}"
 			fi
 		fi
 	else
-		mode_test "$@"
+		command="mode_test "$@""
 	fi
 
-	if [ $? -eq 1 ]; then
-		die "METHYLATION CALLING FAILED"
-	fi
+	#run f5c
+	eval ${command} >"${testdir}/${dataset}/result.txt" 2> "${run_folder}/raw_${run_number}.txt"
+
+	#check whether the execution was successful
+	check_failed "${run_folder}/raw_${run_number}.txt" ${i}
 
 	#extract data
-	echo "\nExtracting data...\n"
+	echo
+	echo "Extracting data..."
+	echo
 
 	#useful data
 	cat "${run_folder}/raw_${run_number}.txt" | grep 'init_cuda\|align_cuda\|load_balance\|memory_balance\|total entries\|total bases\|sec\|max-lf\|Real time:\|advisor::INFO\|cuda::info' | tee "${run_folder}/useful_${run_number}.txt"
@@ -234,7 +301,9 @@ do
 	#summary of test results
 	tail -n 24 "${run_folder}/raw_${run_number}.txt" > "${run_folder}/summary_${run_number}.txt" || echo "Failed to create summary" > "${run_folder}/summary_${run_number}.txt"
 
-	echo "\nData extraction complete. Useful data can be found in ${run_folder}\n"
+	echo
+	echo "Data extraction complete. Useful data can be found in ${run_folder}"
+	echo
 
 	# clear_fscache
 done

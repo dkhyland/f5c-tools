@@ -1,10 +1,13 @@
-#!/bin/sh
+#!/bin/bash
+
+#removes the most recent test
 
 # exit when command fails
 set -e
 
 dataset=LIGATIONFAB42804
 resultdir=../results
+remove_all=0
 
 help_msg() {
 	echo "Parameter tuning script for f5c."
@@ -12,15 +15,17 @@ help_msg() {
 	echo
 	echo "-d [dataset]         Name of dataset to be used."
     echo "-r [result dir]      Directory containing all the results."
+	echo "-a				   Remove all the data in the result folder for the dataset"
 	echo "-h                   Show this help message."
 }
 
 # parse options
-while getopts d:r:h opt
+while getopts d:r:ha opt
 do
 	case $opt in
 		d) dataset="$OPTARG";;
         r) resultdir="$OPTARG";;
+		a) remove_all=1;;
 		h) help_msg
 		   exit 0;;
 		?) printf "Usage: %s args\n" "$0"
@@ -31,14 +36,14 @@ shift $(($OPTIND - 1))
 
 #initialize variables
 result_path="${resultdir}/${dataset}"
-line_number=$(find "${result_path}" -maxdepth 1 -type d -print| wc -l | xargs -n1 expr -1 +)
-test_number=$((${line_number} - 1))
 
-#remove test from relevant files
-rm -r "${result_path}/${test_number}"
-sed -e "${test_number}d" "${result_path}/parameters.txt" > "${result_path}/parameters.txt"
-
-#read and update the run number
-run_number=$( cat "${result_path}/run.config" )
-run_number=$((${run_number} - 1))
-echo $run_number >  "${result_path}/run.config"
+if [ $remove_all -eq 1 ]; then
+	rm -r "${result_path}" || echo "Directory does not exist. Creating now."
+	mkdir $result_path
+else
+	#remove test from relevant files
+	if [ -f "${result_path}/parameters.txt" ]; then
+		head -n -1 "${result_path}/parameters.txt" > temp.txt
+		cat temp.txt > "${result_path}/parameters.txt"
+	fi
+fi

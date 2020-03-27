@@ -1,6 +1,7 @@
 import sys
 import os.path
 import argparse
+from math import log10, floor
 
 #constants
 EPSILON = 0.0001
@@ -22,6 +23,10 @@ COMPUTATIONAL HELPER FUNCTIONS
 ============================================================================
 Functions that help to compute certain results needed for the main functions
 """
+
+#round to a number of s.f
+def round_sig(x, sig=2):
+    return round(x, sig-int(floor(log10(abs(x))))-1)
 
 #compare two floats
 def f_equals(a,b):
@@ -87,7 +92,8 @@ def heed_warning(params_1,params_2,parameter_modified,msg):
             #check whether the parameter is a supported option
             supported = False
             for j in range(len(OPTIONS)):
-                if(parameter == OPTIONS[j]):
+                #don't want t to be modified in the warnings
+                if(parameter == OPTIONS[j] and parameter != '-t'):
                     supported = True
                     break
             if((not supported) or parameter_modified[j]):
@@ -172,7 +178,9 @@ def handle_direction(direction,param_index,main_params,second_params):
         print("Invalid direction: {}".format(direction))
 
     #edit the value in the list and return it
-    final_params = [i for i in main_params]
+    final_params = []
+    for i in range(len(main_params)):
+        final_params.append(main_params[i])
     final_params[param_index] = final_value
 
     return final_value,final_params,stop_test
@@ -254,23 +262,23 @@ def read_average_file(filename):
     averages = []
     params = []
     AVE_FILE = open_file(filename,"r")
-    line = AVE_FILE.readline()
-    if(line == ""):
+    lines = AVE_FILE.readlines()
+    if(lines == []):
         print("{} is empty!".format(filename))
         return averages
     #split the line by colons
-    line_parts = line.strip().split(": ")
-    line_averages = line_parts[1]
-    line_params = line_parts[2]
-    while (line != ""):
+    for i in range(len(lines)):
+        line = lines[i]
+        line_parts = line.split(": ")
+        line_averages = line_parts[1]
+        line_params = line_parts[2]
         averages.append(line_averages.split(" "))
         params.append(line_params.split(" "))
-        line = AVE_FILE.readline()
-        if(line != ""):
-            line_parts = line.strip().split(": ")
-            line_averages = line_parts[1]
-            line_params = line_parts[2]
     AVE_FILE.close()
+    #debug
+    print("read_average: ",averages)
+    print("read_params: ", params)
+
     return averages,params
 
 def write_average_values(filename,average_values,group_params):
@@ -280,18 +288,22 @@ def write_average_values(filename,average_values,group_params):
     AVE_FILE = open_file(filename,"w")
     i = 0
     for j in range(len(average_values)):
-        result = average_values[i]
+        ave_result = average_values[i]
+        param_result = group_params[i]
+        ave_result_format = ["{0:.2f}".format(i) for i in ave_result]
+        param_result_format = ["{0:.2f}".format(i) for i in param_result]
         AVE_FILE.write("{}: ".format(i))
-        AVE_FILE.write(" ".join(["{0:.2f}".format(i) for i in result]))
+        AVE_FILE.write(" ".join(ave_result_format))
         AVE_FILE.write(": ")
-        AVE_FILE.write(" ".join(["{0:.2f}".format(i) for i in group_params[i]]))
-        AVE_FILE.write("\n")
+        AVE_FILE.write(" ".join(param_result_format))
+        if(j + 1 != len(average_values)):
+            AVE_FILE.write("\n")
         i += 1
     AVE_FILE.close()
 
 #write a single line to the file
-def write_line(filename,line):
-    STOP_FILE = open_file(filename,"w")
+def write_line(filename,line,mode):
+    STOP_FILE = open_file(filename,mode)
     STOP_FILE.write(str(line))
     STOP_FILE.close()
 
@@ -330,7 +342,13 @@ def calculate_averages():
     data_split = [i.replace(" ","").rstrip().split(',') for i in data]
 
     #transform into dictionary
+    #data_dict is a list of dictionaries containing param-value/metric-value pairs
     data_dict = []
+    #keys is a list of the keys in sorted order
+    keys = []
+    #only want to append key once
+
+    first_round = True
     for result in data_split:
         result_dict = {}
         for i in range(len(result)):
@@ -338,14 +356,15 @@ def calculate_averages():
             key = result_split[0]
             val = result_split[1]
             result_dict[key] = float(val)
+            if(first_round):
+                keys.append(key)
         data_dict.append(result_dict)
+        first_round = False
 
     #compute average over datasets with identical parameters. assumes that identical datasets are adjacent
     if(len(data_dict) == 0):
         print("Data Dictionary empty")
         return
-    else:
-        keys = list(data_dict[0].keys())
 
     #the parameters used for each group of runs
     group_params = []
@@ -418,134 +437,35 @@ def evaluate_adjustments():
     args = parser.parse_args(sys.argv[2:])
 
     #save the args in local variables
+    param_number= args.parameter
     streak = args.streak
     num_worse = args.num_worse
     w_limit = args.w_limit
     s_limit = args.s_limit
     midpoint = args.midpoint
-    param_number= args.parameter
 
     #list that contains all the argument values to this function for the next iteration. contents are written to a evaluate.params file
     evaluate_params = []
 
-    # i = 0
-    # test_1 = []
-    # test_2 = []
-    # params_1 = []
-    # params_2 = []
     #read data from files
     averages,params = read_average_file(args.average)
+    #whether or not the extraction of file data was successful or not
+    extraction_success = True
+
     #extract the relevant lines to work with
     index_1 = args.test_1
     index_2 = args.test_2
-    print("index1: ",index_1," index2: ",index_2)
+
+    print("index1: ",index_1," index2: ",index_2, "length averages: ",len(averages)," len params: ", len(params))
+
     try:
         test_1 = [float(i) for i in averages[index_1]]
         test_2 = [float(i) for i in averages[index_2]]
         params_1 = [float(i) for i in params[index_1]]
         params_2 = [float(i) for i in params[index_2]]
-        # while i < len(averages):
-        #     test_1.append(float(averages[index_1][i]))
-        #     test_2.append(float(averages[index_2][i]))
-        #     i+=1
-        # i=0
-        # while i < len(params):
-        #     params_1.append(float(params[index_1][i]))
-        #     params_2.append(float(params[index_2][i]))
-        #     i+=1
     except IndexError:
-        print("Index {} out of range.".format(i))
-        return
-
-    #calculate performance comparisons
-    diffs = [(test_1[i] - test_2[i]) for i in range(NUM_METRICS)]
-    percent_diffs = [100*(diffs[i]/test_2[i]) for i in range(NUM_METRICS)]
-
-    #1 means test 1 has better performance, 0 means no significant difference, -1 means worse performance
-    performance = 0
-    #only focus on alignment time for now
-    for i in range(NUM_METRICS - 2):
-        if(percent_diffs[i] > SIGNIFICANCE_LEVEL):
-            #significant worsening in performance
-            performance = -1
-        elif(percent_diffs[i] < -1 * SIGNIFICANCE_LEVEL):
-            #significant improvement in performance
-            performance = 1
-
-    #whether to use the given parameter number or search for it ourselves
-    if(param_number == -1):
-        #find the index of the parameter that was updated
-        param_number = 0
-        while param_number < len(params_1):
-            if(not f_equals(params_1[param_number],params_2[param_number])):
-                break
-            param_number += 1
-
-    #arguments that we will pass in to the handle_direction function
-    direction = 4
-    midpoint_params = [float(i) for i in params[midpoint]]
-    main_params = None
-    second_params = None
-
-    """
-    -4: midpoint of two tests, -3: halve newer value, -2: midpoint towards test_2 (older one), -1: take test_2's value,
-    0: take the midpoint value, 1: take test_1's value, 2: midpoint towards test_1, 3: double, 4: error
-    """
-    #based on arguments of the function and performance decide the course of action to take
-    if(num_worse == w_limit or streak == s_limit):
-        #already reached limit so see which one to take
-        if(midpoint == -1):
-            #no midpoint provided so take the best of the new or old
-            direction = 1 if percent_diffs[0] < 0 else -1
-            main_params = params_1 if direction == 1 else params_2
-        else:
-            #midpoint provided so take the best of the three
-            midpoint_performance = is_midpoint_better(averages,params,midpoint,test_1,test_2)
-            if(midpoint_performance == 1):
-                #midpoint is the best so choose it
-                direction = 0
-                main_params = midpoint_params
-            else:
-                #midpoint isn't the best so choose between test_1 and test_2
-                direction = 1 if percent_diffs[0] < 0 else -1
-                main_params = params_1 if direction == 1 else params_2
-    elif(midpoint == -1):
-        #No midpoint provided, so simply compare the two tests
-        if(performance == 1):
-            #on a streak so keep doubling/halving
-            direction = 3 if params_1[param_number] > params_2[param_number] else -3
-            #always double/halve the newer test parameters
-            main_params = params_1
-            streak += 1
-            # else:
-            #     print("Why are you here if you're not on a streak?")
-            #     return
-        elif(performance == -1 or performance == 0):
-            #check the midpoint of new and old
-            direction = -4
-            main_params = params_1
-            second_params = params_2
-            num_worse += 1
-            streak = 0
-    else:
-        #Midpoint provided so find out whether it is better
-        midpoint_performance = is_midpoint_better(averages,params,midpoint,test_1,test_2)
-        if(midpoint_performance != 1):
-            #check the midpoint of new and old
-            num_worse += 1
-        #take the midpoint no matter what
-        direction = 2 if percent_diffs[0] < 0 else  -2
-        main_params = midpoint_params
-        second_params = params_1 if direction == 2 else params_2
-
-    #sanity check
-    if(main_params is None):
-        print("main_params is None!")
-        return
-
-    print("Taking direction: {}".format(direction))
-    #make adjustments to parameter values and return them
-    final_value,final_params,stop_test = handle_direction(direction,param_number,main_params,second_params)
+        print("Index out of range.")
+        extraction_success = False
 
     #take the path to the averages file and replace it with a different filename
     output_profile = args.average.split("/")[:-1]
@@ -555,36 +475,137 @@ def evaluate_adjustments():
     output_stop_test.append("stop.test")
     output_evaluate_params.append("evaluate.parameters")
 
-    #evaluate params contains the arguments to be passed to the next call to evaluate
-    #data stored in format: test_1, test_2, streak, num_worse, w_limit, s_limit, midpoint
-    if direction in ONE_DATASET:
-        #no midpoint but next test is the new test_1
-        evaluate_params = [args.average,'-p '+str(param_number),str(index_1+1),str(index_1),str(streak),str(num_worse),'-w '+str(w_limit),'-s '+str(s_limit)]
-    elif direction in TWO_DATASETS:
-        #first time taking a midpoint so reuse the current test indices. Else, increment them
-        if(midpoint == -1):
-            evaluate_params = [args.average,'-p '+str(param_number),str(index_1),str(index_2),str(streak),str(num_worse),'-w '+str(w_limit),'-s '+str(s_limit),'-m '+str(index_1+1)]
-        else:
-            evaluate_params = [args.average,'-p '+str(param_number),str(midpoint),str(index_1),str(streak),str(num_worse),'-w '+str(w_limit),'-s '+str(s_limit),'-m '+str(midpoint+1)]
-    else:
-        print("Hmmm something wrong with direction")
+    #join the split filename arrays to recover the path as a string
     output_filename = "/".join(output_profile)
     output_stop_filename = "/".join(output_stop_test)
     output_evaluate_filename = "/".join(output_evaluate_params)
 
-    #write new parameters to the file
-    write_param_values(output_filename,final_params)
-    write_line(output_stop_filename,stop_test)
-    write_line(output_evaluate_filename," ".join(evaluate_params))
+    if(extraction_success):
+        #calculate performance comparisons
+        diffs = [(test_1[i] - test_2[i]) for i in range(NUM_METRICS)]
+        percent_diffs = [100*(diffs[i]/test_2[i]) for i in range(NUM_METRICS)]
 
-    print("\n====================================================================================================")
-    print("Test 1 averages: {} Parameters used: {}".format(test_1,params_1))
-    print("Test 2 averages: {} Parameters used: {}".format(test_2,params_2))
-    print("Absolute differences: {}".format(diffs))
-    print("Percentage differences: {}".format(percent_diffs))
-    print("Changed parameter '{}' to: {}. test 1: {}, test 2: {}".format(OPTIONS[param_number],final_value,params_1[param_number],params_2[param_number]))
-    print("New parameters: {}".format(final_params))
-    print("====================================================================================================\n")
+        #1 means test 1 has better performance, 0 means no significant difference, -1 means worse performance
+        performance = 0
+        #only focus on alignment time for now
+        for i in range(NUM_METRICS - 2):
+            if(percent_diffs[i] > SIGNIFICANCE_LEVEL):
+                #significant worsening in performance
+                performance = -1
+            elif(percent_diffs[i] < -1 * SIGNIFICANCE_LEVEL):
+                #significant improvement in performance
+                performance = 1
+
+        #whether to use the given parameter number or search for it ourselves
+        if(param_number == -1):
+            #find the index of the parameter that was updated
+            param_number = 0
+            while param_number < len(params_1):
+                if(not f_equals(params_1[param_number],params_2[param_number])):
+                    break
+                param_number += 1
+
+        #arguments that we will pass in to the handle_direction function
+        direction = 4
+        midpoint_params = [float(i) for i in params[midpoint]]
+        main_params = None
+        second_params = None
+
+        """
+        -4: midpoint of two tests, -3: halve newer value, -2: midpoint towards test_2 (older one), -1: take test_2's value,
+        0: take the midpoint value, 1: take test_1's value, 2: midpoint towards test_1, 3: double, 4: error
+        """
+        #based on arguments of the function and performance decide the course of action to take
+        if(num_worse == w_limit or streak == s_limit):
+            #already reached limit so see which one to take
+            if(midpoint == -1):
+                #no midpoint provided so take the best of the new or old
+                direction = 1 if percent_diffs[0] < 0 else -1
+                main_params = params_1 if direction == 1 else params_2
+            else:
+                #midpoint provided so take the best of the three
+                midpoint_performance = is_midpoint_better(averages,params,midpoint,test_1,test_2)
+                if(midpoint_performance == 1):
+                    #midpoint is the best so choose it
+                    direction = 0
+                    main_params = midpoint_params
+                else:
+                    #midpoint isn't the best so choose between test_1 and test_2
+                    direction = 1 if percent_diffs[0] < 0 else -1
+                    main_params = params_1 if direction == 1 else params_2
+        elif(midpoint == -1):
+            #No midpoint provided, so simply compare the two tests
+            if(performance == 1):
+                #on a streak so keep doubling/halving
+                direction = 3 if params_1[param_number] > params_2[param_number] else -3
+                #always double/halve the newer test parameters
+                main_params = params_1
+                streak += 1
+                # else:
+                #     print("Why are you here if you're not on a streak?")
+                #     return
+            elif(performance == -1 or performance == 0):
+                #check the midpoint of new and old
+                direction = -4
+                main_params = params_1
+                second_params = params_2
+                num_worse += 1
+                streak = 0
+        else:
+            #Midpoint provided so find out whether it is better
+            midpoint_performance = is_midpoint_better(averages,params,midpoint,test_1,test_2)
+            if(midpoint_performance != 1):
+                #check the midpoint of new and old
+                num_worse += 1
+            #take the midpoint no matter what
+            direction = 2 if percent_diffs[0] < 0 else  -2
+            main_params = midpoint_params
+            second_params = params_1 if direction == 2 else params_2
+
+        #sanity check
+        if(main_params is None):
+            print("main_params is None!")
+            return
+
+        print("Taking direction: {}".format(direction))
+        #make adjustments to parameter values and return them
+        final_value,final_params,stop_test = handle_direction(direction,param_number,main_params,second_params)
+
+        #evaluate params contains the arguments to be passed to the next call to evaluate
+        #data stored in format: test_1, test_2, streak, num_worse, w_limit, s_limit, midpoint
+        if direction in ONE_DATASET:
+            #no midpoint but next test is the new test_1
+            evaluate_params = [args.average,'-p '+str(param_number),str(index_1+1),str(index_1),str(streak),str(num_worse),'-w '+str(w_limit),'-s '+str(s_limit)]
+        elif direction in TWO_DATASETS:
+            #first time taking a midpoint so reuse the current test indices. Else, increment them
+            if(midpoint == -1):
+                evaluate_params = [args.average,'-p '+str(param_number),str(index_1),str(index_2),str(streak),str(num_worse),'-w '+str(w_limit),'-s '+str(s_limit),'-m '+str(index_1+1)]
+            else:
+                evaluate_params = [args.average,'-p '+str(param_number),str(midpoint),str(index_1),str(streak),str(num_worse),'-w '+str(w_limit),'-s '+str(s_limit),'-m '+str(midpoint+1)]
+        else:
+            print("Hmmm something wrong with direction")
+
+        #join all the parameters into one string
+        evaluate_params_out = " ".join(evaluate_params)
+
+        #write new parameters to the file
+        write_param_values(output_filename,final_params)
+        write_line(output_stop_filename,stop_test,"w")
+        write_line(output_evaluate_filename,evaluate_params_out,"w")
+
+        print("\n====================================================================================================")
+        print("Test 1 averages: {} Parameters used: {}".format(test_1,params_1))
+        print("Test 2 averages: {} Parameters used: {}".format(test_2,params_2))
+        print("Absolute differences: {}".format(diffs))
+        print("Percentage differences: {}".format(percent_diffs))
+        print("Changed parameter '{}' to: {}. test 1: {}, test 2: {}".format(OPTIONS[param_number],final_value,params_1[param_number],params_2[param_number]))
+        print("New parameters: {}".format(final_params))
+        print("====================================================================================================\n")
+    else:
+        #test doesn't stop
+        write_line(output_stop_filename,False,"w")
+        #use same arguments as before
+        write_line(output_evaluate_filename,"{} -p {} {} {} {} {} {} -w {} -s {} -m {}".format(args.average,param_number,index_1,index_2,streak,num_worse,w_limit,s_limit,midpoint),"w")
 
 """
 adjust_warnings
@@ -712,6 +733,9 @@ def modify_parameter():
     #read data from files
     current_params = read_profile_file(args.profile)
 
+    #debug
+    # print(current_params)
+
     #sanity checks
     if (args.parameter_number < 0 or args.parameter_number > NUM_PARAMETERS):
         print("Parameter number {} out of range.".format(args.parameter_number))
@@ -736,7 +760,11 @@ def modify_parameter():
     if(args.value > 0):
         new_value = args.value
     elif(args.scale_factor > 0):
-        new_value = old_value * args.scale_factor
+        #round to 2 s.f. if the parameter is larger than 10000
+        if(old_value > 10000):
+            new_value = round_sig(old_value * args.scale_factor)
+        else:
+            new_value = old_value * args.scale_factor
     else:
         print("Please set one of the -s or -v flags.")
         return None
@@ -773,8 +801,8 @@ def choose():
         for i in range(len(averages)):
             result = averages[i]
             align_time = float(result[0])
-            #better than the current one
-            if align_time < best:
+            #better than the current one by at least 5%
+            if (100 * (best - align_time)/align_time) > SIGNIFICANCE_LEVEL:
                 best = align_time
                 best_index = i
         #get the parameters for the best performing test and save them
@@ -789,6 +817,48 @@ def choose():
     write_param_values(param_file,best_params)
 
     print("Best test: {}, Parameters: {}".format(best_index,params[best_index]))
+
+"""
+compare()
+===================================================================================================
+Calculate the ratio between two -B values and printing whether the ratio is greater than 2.0 or not
+"""
+def compare():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('recommended',type=float,help='Recommended value of max_bases (B) as given by the f5c warning')
+    parser.add_argument('current',type=float,help='Actual value of max_bases (B) used in the test')
+    args = parser.parse_args(sys.argv[2:])
+    #calculate ratio
+    ratio = float(args.current/args.recommended)
+    #output whether ratio is greater than 2.0 or not
+    if(ratio > 2.0):
+        print(">2.0")
+        #use double the recommended value as our new one
+        print(args.recommended * 2000000)
+    elif(ratio > 0.75):
+        print(">0.75")
+    else:
+        print("<=0.75")
+
+
+"""
+remove_duplicates()
+==============================================================================
+Remove all duplicate lines in a given file and save the lines to the same file
+"""
+def remove_duplicates():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('filename',help='Name of the file from which duplicate lines should be removed')
+    args = parser.parse_args(sys.argv[2:])
+    filename = args.filename
+    file = open_file(filename,"r")
+    lines = list(set(file.readlines()))
+    file.close()
+    file = open_file(filename,"w")
+    for line in lines:
+        if(line != "\n"):
+            file.write(line)
+    file.close()
 
 """
 main
@@ -807,6 +877,8 @@ parser = argparse.ArgumentParser(
             'evaluate':            (for evaluating whether a change in parameter led to better or worse performance)
             'modify'  :            (for directly modifying the value of a given parameter)
             'choose':              (for selecting the test with the best average performance and storing its parameters)
+            'compare':             (for calculating the ratio between two -B values and printing whether the ratio is greater than 2.0 or not)
+            'remove_duplicates:    (for removing all duplicate lines in a given file)'
 
     usage:
             'make_profile'
@@ -841,6 +913,13 @@ parser = argparse.ArgumentParser(
 
             'choose [results]'
                 [results] :            (path to the file containing the subset of the averages.txt file which we will be searching)
+
+            'compare [recommended] [current]:'
+                [recommended] :        (the recommended value of max_bases (B) as given by the f5c warning)
+                [current] :            (the actual value of max_bases (B) used in the test)
+
+            'remove_duplicates [filename]:''
+                [filename] :           (the name of the file from which duplicates are to be removed)
             '''
 )
 
@@ -859,5 +938,9 @@ elif(args.mode == 'modify'):
     modify_parameter()
 elif(args.mode == 'choose'):
     choose()
+elif(args.mode == 'compare'):
+    compare()
+elif(args.mode == 'remove_duplicates'):
+    remove_duplicates()
 else:
     parser.print_usage()

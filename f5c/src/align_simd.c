@@ -35,7 +35,7 @@ static inline uint32_t get_kmer_rank(const char* str, uint32_t k) {
         //r += rank(str[k - i - 1]) * p;
         //p *= size();
         r += get_rank(str[k - i - 1]) << (i << 1);
-    } 
+    }
     return r;
 }
 
@@ -59,7 +59,7 @@ scalings_t estimate_scalings_using_mom(char* sequence, int32_t sequence_len,
     // Calculate summary statistics over the events and
     // the model implied by the read
     float event_level_sum = 0.0f; //do we need double?
-    for (int32_t i = 0; i < et.n; ++i) {
+    for (uint32_t i = 0; i < et.n; ++i) {
         event_level_sum += et.event[i].mean;
     }
 
@@ -77,7 +77,7 @@ scalings_t estimate_scalings_using_mom(char* sequence, int32_t sequence_len,
 
     // estimate scale
     float event_level_sq_sum = 0.0f;
-    for (int32_t i = 0; i < et.n; ++i) {
+    for (uint32_t i = 0; i < et.n; ++i) {
         event_level_sq_sum +=
             (et.event[i].mean - shift) * (et.event[i].mean - shift);
     }
@@ -109,8 +109,8 @@ static inline float log_normal_pdf(float x, float gp_mean, float gp_stdv,
 
 static inline float log_probability_match_r9(scalings_t scaling,
                                              model_t* models,
-                                             event_table events, int event_idx,
-                                             uint32_t kmer_rank, uint8_t strand,
+                                             event_table events, int32_t event_idx,
+                                             int32_t kmer_rank, uint8_t strand,
                                              float sample_rate) {
     // event level mean, scaled with the drift value
     strand = 0;
@@ -144,6 +144,30 @@ static inline float log_probability_match_r9(scalings_t scaling,
     return lp;
 }
 
+//SSE2 helper function to compare two floating point vectors. Returns 1 in positions where the value is the same and 0 if not.
+__m128i compare_from_vec(__m128 vec1, __m128 vec2){
+    return _mm_add_epi32((__m128i)_mm_cmpeq_ps(vec1,vec2),_mm_set1_epi32(1));
+}
+
+//Helper function to print a single band vector and a from vector
+void print_band_trace(int32_t band_idx, __m128 band_vec, __m128i from_vec){
+    float * band = (float *)malloc(4 * sizeof(float));
+    int32_t * from = (int32_t *)malloc(4 * sizeof(int32_t));;
+
+    _mm_store_ps(band,band_vec);
+    //_mm_stream_si32(from,_mm_cvtsi128_si32(from_vec));
+    from[0] = _mm_cvtsi128_si32(from_vec);
+    from[1] = _mm_cvtsi128_si32(_mm_srai_epi32(from_vec,32));
+    from[2] = _mm_cvtsi128_si32(_mm_srai_epi32(from_vec,64));
+    from[3] = _mm_cvtsi128_si32(_mm_srai_epi32(from_vec,96));
+
+    // fprintf(stderr, "Band number: %d, Band: (%.2f,%.2f,%.2f,%.2f), From: (%d,%d,%d,%d)\n",band_idx,band[0],band[1],band[2],band[3],from[0],from[1],from[2],from[3]);
+
+
+    free(band);
+    free(from);
+}
+
 #define event_kmer_to_band(ei, ki) (ei + 1) + (ki + 1)
 #define band_event_to_offset(bi, ei) band_lower_left[bi].event_idx - (ei)
 #define band_kmer_to_offset(bi, ki) (ki) - band_lower_left[bi].kmer_idx
@@ -151,9 +175,9 @@ static inline float log_probability_match_r9(scalings_t scaling,
 #define event_at_offset(bi, offset) band_lower_left[(bi)].event_idx - (offset)
 #define kmer_at_offset(bi, offset) band_lower_left[(bi)].kmer_idx + (offset)
 
-#define move_down(curr_band)                                                   \
+#define move_down(curr_band) \
     { curr_band.event_idx + 1, curr_band.kmer_idx }
-#define move_right(curr_band)                                                  \
+#define move_right(curr_band) \
     { curr_band.event_idx, curr_band.kmer_idx + 1 }
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -169,20 +193,12 @@ static inline float log_probability_match_r9(scalings_t scaling,
 #endif
 
 //SIMD INSTRUCTIONS. TODO: implement
-#define sse2_event_kmer_to_band(ei, ki)
-#define sse2_band_event_to_offset(bi, ei) 
-#define sse2_band_kmer_to_offset(bi, ki)
-#define sse2_is_offset_valid(offset) (offset) >= 0 && (offset) < bandwidth
-#define sse2_event_at_offset(bi, offset) band_lower_left[(bi)].event_idx - (offset)
-#define sse2_kmer_at_offset(bi, offset) band_lower_left[(bi)].kmer_idx + (offset)
-#define sse2_move_down(curr_band)                                                   \
-    { curr_band.event_idx + 1, curr_band.kmer_idx }
-#define sse2_move_right(curr_band)                                                  \
-    { curr_band.event_idx, curr_band.kmer_idx + 1 }
 
-#define sse2_MIN(a, b) (((a) < (b)) ? (a) : (b))
-#define sse2_MAX(a, b) (((a) > (b)) ? (a) : (b))
-#define sse2_convert_size(size) ((size) / 4) + 1
+//Return the vector corresponding to the (r,c) position in band/trace vec
+#define BAND_ARRAY_VEC(r,c) ( band_vec[(r)*(ALN_BANDWIDTH/4)+(c)] )
+#define TRACE_ARRAY_VEC(r,c) ( trace_vec[(r)*(ALN_BANDWIDTH/4)+(c)] )
+#define sse2_convert_size(size) ((size) + 3 / 4)
+#define sse2_convert_index(index) ((index) / 4)
 
 int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
               event_table events, model_t* models, scalings_t scaling,
@@ -198,9 +214,9 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
     int32_t n_kmers = sequence_len - k + 1;
     //fprintf(stderr,"n_kmers : %d\n",n_kmers);
     // backtrack markers
-    const uint8_t FROM_D = 0;
-    const uint8_t FROM_U = 1;
-    const uint8_t FROM_L = 2;
+    const int32_t FROM_D = 0;
+    const int32_t FROM_U = 1;
+    const int32_t FROM_L = 2;
 
     // qc
     float min_average_log_emission = -5.0;
@@ -211,7 +227,7 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
     int32_t half_bandwidth = ALN_BANDWIDTH / 2;
 
     //SSE2 number of vectors in a band
-    int32_t bandwidth_vec = sse2_convert_size(bandwidth);
+    // int32_t bandwidth_vec = sse2_convert_size(bandwidth);
 
     // transition penalties
     float events_per_kmer = (float)n_events / n_kmers;
@@ -226,19 +242,14 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
     float lp_trim = log(0.01);
 
     //SSE2 constant vectors
-    __m128i epsilon_vec = _mm_set1_ps(epsilon);
-    __m128i lp_skip_vec = _mm_set1_ps(lp_skip);
-    __m128i lp_stay_vec = _mm_set1_ps(lp_stay);
-    __m128i lp_step_vec = _mm_set1_ps(lp_step);
-    __m128i lp_trim_vec = _mm_set1_ps(lp_trim);
+    __m128 lp_skip_vec = _mm_set1_ps(lp_skip);
+    __m128 lp_stay_vec = _mm_set1_ps(lp_stay);
+    __m128 lp_step_vec = _mm_set1_ps(lp_step);
 
     // dp matrix
     int32_t n_rows = n_events + 1;
     int32_t n_cols = n_kmers + 1;
     int32_t n_bands = n_rows + n_cols;
-
-    //SSE2 number of band vectors
-    int32_t n_band_vecs = sse2_convert_size(n_bands)
 
     // Initialize
 
@@ -256,34 +267,44 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
 #ifdef ALIGN_2D_ARRAY
     float** bands = (float**)malloc(sizeof(float*) * n_bands);
     MALLOC_CHK(bands);
-    uint8_t** trace = (uint8_t**)malloc(sizeof(uint8_t*) * n_bands);
+    int32_t** trace = (int32_t**)malloc(sizeof(int32_t*) * n_bands);
     MALLOC_CHK(trace);
 #else
     float* bands = (float*)malloc(sizeof(float) * n_bands * bandwidth);
     MALLOC_CHK(bands);
-    uint8_t* trace = (uint8_t*)malloc(sizeof(uint8_t) * n_bands * bandwidth);
+    int32_t* trace = (int32_t*)malloc(sizeof(int32_t) * n_bands * bandwidth);
     MALLOC_CHK(trace);
 
     //SSE2 version of bands and trace
-    __m128i *band_vec = (__m128i *)malloc(sizeof(__m128i) * n_bands * bandwidth_vec);
-    MALLOC_CHK(band_vec);
-    __m128i *trace_vec = (__m128i *)malloc(sizeof(__m128i) * n_bands * bandwidth_vec);
-    MALLOC_CHK(band_vec);
+    // __m128 *band_vec = (__m128 *)malloc(sizeof(__m128) * n_bands * bandwidth_vec);
+    // MALLOC_CHK(band_vec);
+    // __m128i *trace_vec = (__m128i *)malloc(sizeof(__m128i) * n_bands * bandwidth_vec);
+    // MALLOC_CHK(band_vec);
 
 #endif
+
+    //Initialize default values
     for (int32_t i = 0; i < n_bands; i++) {
     #ifdef ALIGN_2D_ARRAY
         bands[i] = (float*)malloc(sizeof(float) * bandwidth);
         MALLOC_CHK(bands[i]);
-        trace[i] = (uint8_t*)malloc(sizeof(uint8_t) * bandwidth);
+        trace[i] = (int32_t*)malloc(sizeof(int32_t) * bandwidth);
         MALLOC_CHK(trace[i]);
     #endif
 
-        for (int j = 0; j < bandwidth; j++) {
+        for (int32_t j = 0; j < bandwidth; j++) {
             BAND_ARRAY(i,j) = -INFINITY;
             TRACE_ARRAY(i,j) = 0;
         }
     }
+
+    //SSE2 initialize default values
+    // for (int32_t i = 0; i < n_bands; i++) {
+    //     for (int32_t j = 0; j < bandwidth_vec; j++) {
+    //         BAND_ARRAY_VEC(i,j) = _mm_set1_ps(-INFINITY);
+    //         TRACE_ARRAY_VEC(i,j) = _mm_set1_epi32(0);
+    //     }
+    // }
 
     // Keep track of the event/kmer index for the lower left corner of the band
     // these indices are updated at every iteration to perform the adaptive banding
@@ -305,30 +326,79 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
     band_lower_left[0].kmer_idx = -1 - half_bandwidth;
     band_lower_left[1] = move_down(band_lower_left[0]);
 
-    //todo: SSE2 initialize first 2
+    //simd_debug
+    // fprintf(stderr,"init: %d,%d,%d,%d\n",band_lower_left[0].event_idx,band_lower_left[0].kmer_idx,
+    // band_lower_left[1].event_idx,band_lower_left[1].kmer_idx);
 
     int32_t start_cell_offset = band_kmer_to_offset(0, -1);
-    assert(is_offset_valid(start_cell_offset));
-    assert(band_event_to_offset(0, -1) == start_cell_offset);
+    // assert(is_offset_valid(start_cell_offset));
+    // assert(band_event_to_offset(0, -1) == start_cell_offset);
     BAND_ARRAY(0,start_cell_offset) = 0.0f;
+
+    //Put the zero in the right place within the vector
+    // int32_t sse2_start_position = start_cell_offset % 4;
+    // int32_t sse2_start_cell = sse2_convert_index(start_cell_offset);
+    // switch (sse2_start_position)
+    // {
+    //     case 0:
+    //         BAND_ARRAY_VEC(0,sse2_start_cell) = _mm_set_ps(0.0,-INFINITY,-INFINITY,-INFINITY);
+    //     case 1:
+    //         BAND_ARRAY_VEC(0,sse2_start_cell) = _mm_set_ps(-INFINITY,0.0,-INFINITY,-INFINITY);
+    //     case 2:
+    //         BAND_ARRAY_VEC(0,sse2_start_cell) = _mm_set_ps(-INFINITY,-INFINITY,0.0,-INFINITY);
+    //     case 3:
+    //         BAND_ARRAY_VEC(0,sse2_start_cell) = _mm_set_ps(-INFINITY,-INFINITY,-INFINITY,0.0);
+    // }
 
     // band 1: first event is trimmed
     int32_t first_trim_offset = band_event_to_offset(1, 0);
-    assert(kmer_at_offset(1, first_trim_offset) == -1);
-    assert(is_offset_valid(first_trim_offset));
+    // assert(kmer_at_offset(1, first_trim_offset) == -1);
+    // assert(is_offset_valid(first_trim_offset));
     BAND_ARRAY(1,first_trim_offset) = lp_trim;
     TRACE_ARRAY(1,first_trim_offset) = FROM_U;
 
+    //Put the values in the right place within the vector
+    // int32_t sse2_first_trim = sse2_convert_index(first_trim_offset);
+    // switch (sse2_start_position)
+    // {
+    //     case 0:
+    //         BAND_ARRAY_VEC(1,sse2_first_trim) = _mm_set_ps(lp_trim,-INFINITY,-INFINITY,-INFINITY);
+    //         TRACE_ARRAY_VEC(1,sse2_first_trim) = _mm_set_epi32(FROM_U,0,0,0);
+    //     case 1:
+    //         BAND_ARRAY_VEC(1,sse2_first_trim) = _mm_set_ps(-INFINITY,lp_trim,-INFINITY,-INFINITY);
+    //         TRACE_ARRAY_VEC(1,sse2_first_trim) = _mm_set_epi32(0,FROM_U,0,0);
+    //     case 2:
+    //         BAND_ARRAY_VEC(1,sse2_first_trim) = _mm_set_ps(-INFINITY,-INFINITY,lp_trim,-INFINITY);
+    //         TRACE_ARRAY_VEC(1,sse2_first_trim) = _mm_set_epi32(0,0,FROM_U,0);
+    //     case 3:
+    //         BAND_ARRAY_VEC(1,sse2_first_trim) = _mm_set_ps(-INFINITY,-INFINITY,-INFINITY,lp_trim);
+    //         TRACE_ARRAY_VEC(1,sse2_first_trim) = _mm_set_epi32(0,0,0,FROM_U);
+    // }
+
+    //Declare/initialise variables needed for the loops
+    int32_t event_idx,kmer_idx,kmer_rank,offset_up,offset_left,offset_diag;
+    float lp_emission;
     int32_t fills = 0;
+    float *up_arr = (float *)malloc(sizeof(float) * 4);
+    MALLOC_CHK(up_arr);
+    float *left_arr = (float *)malloc(sizeof(float) * 4);
+    MALLOC_CHK(left_arr);
+    float *diag_arr = (float *)malloc(sizeof(float) * 4);
+    MALLOC_CHK(diag_arr);
+    float *lp_emission_arr = (float *)malloc(sizeof(float) * 4);
+    MALLOC_CHK(lp_emission_arr);
+    int32_t *from_arr = (int32_t *)malloc(sizeof(int32_t) * 4);
+    MALLOC_CHK(from_arr);
+    float * band_arr = (float *)malloc(sizeof(float) * 4);
+    MALLOC_CHK(band_arr);
+
 #ifdef DEBUG_ADAPTIVE
     fprintf(stderr, "[trim] bi: %d o: %d e: %d k: %d s: %.2lf\n", 1,
             first_trim_offset, 0, -1, bands[1][first_trim_offset]);
 #endif
-
-    //SSE2 vector analogue of band_lower_left
-    __m128i *ll_event_idx_vec = (__m128i *) malloc(sizeof(__m128i) * n_band_vecs);
-    __m128i *ll_kmer_idx_vec = (__m128i *) malloc(sizeof(__m128i) * n_band_vecs);
-
+    //simd_debug
+    int num_right = 0;
+    int num_down = 0;
     // fill in remaining bands
     for (int32_t band_idx = 2; band_idx < n_bands; ++band_idx) {
         // Determine placement of this band according to Suzuki's adaptive algorithm
@@ -336,6 +406,10 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
         // otherwise we decide based on scores
         float ll = BAND_ARRAY(band_idx - 1,0);
         float ur = BAND_ARRAY(band_idx - 1,bandwidth - 1);
+
+        //simd_debug
+        fprintf(stderr,"band_idx: %d, ll: %f,ur: %f\n",band_idx,ll,ur);
+
         bool ll_ob = ll == -INFINITY;
         bool ur_ob = ur == -INFINITY;
 
@@ -349,9 +423,13 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
         if (right) {
             band_lower_left[band_idx] =
                 move_right(band_lower_left[band_idx - 1]);
+            //simd_debug
+            num_right++;
         } else {
             band_lower_left[band_idx] =
                 move_down(band_lower_left[band_idx - 1]);
+            //simd_debug
+            num_down++;
         }
         // If the trim state is within the band, fill it in here
         int32_t trim_offset = band_kmer_to_offset(band_idx, -1);
@@ -377,64 +455,168 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
 
         int32_t max_offset = MIN(kmer_max_offset, event_max_offset);
         max_offset = MIN(max_offset, bandwidth);
-        
-        //Initialise band-dependent SSE2 variables
 
-        //Analogue of for loop counter offset
-        __m128i offset_vec = _mm_set_epi32(0, 1, 2, 3);
-        __m128i increment_vec = _mm_set_epi32(4, 4, 4, 4);
+        //Inner loop: Parallelised with SSE2. Jump up 4 every time
+        for (int32_t offset = min_offset; offset < max_offset; offset += 4) {
+            if(offset + 4 >= max_offset){
+                //If we don't have >= 4 cells left to fill, compute individually using a sequential loop
+                for(int32_t seq_offset = offset; seq_offset < max_offset; seq_offset++){
+                    event_idx = event_at_offset(band_idx, seq_offset);
+                    kmer_idx = kmer_at_offset(band_idx, seq_offset);
+                    kmer_rank = kmer_ranks[kmer_idx];
+                    //simd_debug
+                    // fprintf(stderr, "event idx %d, kmer_idx: %d, kmer rank %d, band_idx: %d, seq_offset: %d, bllevent: %d, bllkmer: %d\n", 
+                    // event_idx,kmer_idx,kmer_rank,band_idx,seq_offset,band_lower_left[band_idx].event_idx,band_lower_left[band_idx].kmer_idx);
 
-        //Comparison vectors
-        __m128i zero_vec = _mm_setzero_si128();
-        __m128i out_of_bounds_vec = _mm_set1_epi32(bandwidth_vec);
-
-        //Inner loop: Parallelised with SSE2
-        for (int32_t offset = min_offset; offset < sse2_convert_size(max_offset); ++offset) {
-            int32_t event_idx = event_at_offset(band_idx, offset);
-            int32_t kmer_idx = kmer_at_offset(band_idx, offset);
-
-            int32_t kmer_rank = kmer_ranks[kmer_idx];
-
-            int32_t offset_up = band_event_to_offset(band_idx - 1, event_idx - 1);
-            int32_t offset_left = band_kmer_to_offset(band_idx - 1, kmer_idx - 1);
-            int32_t offset_diag = band_kmer_to_offset(band_idx - 2, kmer_idx - 1);
+                    //Offset of the up, left, and diagonal positions
+                    offset_up = band_event_to_offset(band_idx - 1, event_idx - 1);
+                    offset_left = band_kmer_to_offset(band_idx - 1, kmer_idx - 1);
+                    offset_diag = band_kmer_to_offset(band_idx - 2, kmer_idx - 1);
 
 #ifdef DEBUG_ADAPTIVE
-            // verify loop conditions
-            assert(kmer_idx >= 0 && kmer_idx < n_kmers);
-            assert(event_idx >= 0 && event_idx < n_events);
-            assert(offset_diag ==
-                   band_event_to_offset(band_idx - 2, event_idx - 1));
-            assert(offset_up - offset_left == 1);
-            assert(offset >= 0 && offset < bandwidth);
+                    // verify loop conditions
+                    assert(kmer_idx >= 0 && kmer_idx < n_kmers);
+                    assert(event_idx >= 0 && event_idx < n_events);
+                    assert(offset_diag == band_event_to_offset(band_idx - 2, event_idx - 1));
+                    assert(offset_up - offset_left == 1);
+                    assert(seq_offset >= 0 && seq_offset < bandwidth);
 #endif
 
-            float up = is_offset_valid(offset_up)
-                           ? BAND_ARRAY(band_idx - 1,offset_up)
-                           : -INFINITY;
-            float left = is_offset_valid(offset_left)
-                             ? BAND_ARRAY(band_idx - 1,offset_left)
-                             : -INFINITY;
-            float diag = is_offset_valid(offset_diag)
-                             ? BAND_ARRAY(band_idx - 2,offset_diag)
-                             : -INFINITY;
+                    float up = is_offset_valid(offset_up)
+                            ? BAND_ARRAY(band_idx - 1,offset_up)
+                            : -INFINITY;
 
-            float lp_emission =
-                log_probability_match_r9(scaling, models, events, event_idx,
-                                         kmer_rank, strand_idx, sample_rate);
-            //fprintf(stderr, "lp emission : %f , event idx %d, kmer rank %d\n", lp_emission,event_idx,kmer_rank);
-            float score_d = diag + lp_step + lp_emission;
-            float score_u = up + lp_stay + lp_emission;
-            float score_l = left + lp_skip;
+                    float left = is_offset_valid(offset_left)
+                                ? BAND_ARRAY(band_idx - 1,offset_left)
+                                : -INFINITY;
 
-            float max_score = score_d;
-            uint8_t from = FROM_D;
+                    float diag = is_offset_valid(offset_diag)
+                                ? BAND_ARRAY(band_idx - 2,offset_diag)
+                                : -INFINITY;
 
-            max_score = score_u > max_score ? score_u : max_score;
-            from = max_score == score_u ? FROM_U : from;
-            max_score = score_l > max_score ? score_l : max_score;
-            from = max_score == score_l ? FROM_L : from;
+                    lp_emission = log_probability_match_r9(scaling, models, events, event_idx,
+                                            kmer_rank, strand_idx, sample_rate);
+                    
+                    //simd_debug
+                    // fprintf(stderr, "lp emission : %f\n", lp_emission);
+                    
+                    //Compute score and from values for single entry
+                    float score_d_s = diag + lp_step + lp_emission;
+                    float score_u_s = up + lp_stay + lp_emission;
+                    float score_l_s = left + lp_skip;
 
+                    //A single max_score/from calculation
+                    float max_score_single = score_d_s;
+                    int32_t from_single = FROM_D;
+
+                    max_score_single = score_u_s > max_score_single ? score_u_s : max_score_single;
+                    from_single = max_score_single == score_u_s ? FROM_U : from_single;
+                    max_score_single = score_l_s > max_score_single ? score_l_s : max_score_single;
+                    from_single = max_score_single == score_l_s ? FROM_L : from_single;
+
+                    //simd_debug
+                    fprintf(stderr, "offset: %d, score: %f, from : %d\n",seq_offset,max_score_single,from_single);
+
+                    //Store in arrays
+                    BAND_ARRAY(band_idx,seq_offset) = max_score_single;
+                    TRACE_ARRAY(band_idx,seq_offset) = from_single;
+                    fills += 1;
+                }
+            }else{
+                //Compute using SIMD
+                //Need to load values sequentially because the __m128i vectors don't overlap
+                //Load 4 values corresponding to the left, up and diagonal bands into arrays
+                for (int32_t vec_pos = 0; vec_pos < 4 ; ++vec_pos) {
+                    //Index of the first element of the vector we are looking at
+                    event_idx = event_at_offset(band_idx, offset + vec_pos);
+                    kmer_idx = kmer_at_offset(band_idx, offset + vec_pos);
+                    //simd_debug
+                    // fprintf(stderr, "event idx %d, kmer_idx: %d, kmer rank %d, band_idx: %d, vec_pos: %d, offset: %d, bllevent: %d, bllkmer: %d\n", event_idx,kmer_idx,kmer_rank,
+                    // band_idx,vec_pos,offset,band_lower_left[band_idx].event_idx,band_lower_left[band_idx].kmer_idx);
+                    kmer_rank = kmer_ranks[kmer_idx];
+
+                    //Offset of the up, left, and diagonal positions
+                    offset_up = band_event_to_offset(band_idx - 1, event_idx - 1);
+                    offset_left = band_kmer_to_offset(band_idx - 1, kmer_idx - 1);
+                    offset_diag = band_kmer_to_offset(band_idx - 2, kmer_idx - 1);
+
+#ifdef DEBUG_ADAPTIVE
+                    // verify loop conditions
+                    assert(kmer_idx >= 0 && kmer_idx < n_kmers);
+                    assert(event_idx >= 0 && event_idx < n_events);
+                    assert(offset_diag == band_event_to_offset(band_idx - 2, event_idx - 1));
+                    assert(offset_up - offset_left == 1);
+                    assert(offset >= 0 && offset < bandwidth);
+#endif
+
+                    float up = is_offset_valid(offset_up)
+                            ? BAND_ARRAY(band_idx - 1,offset_up)
+                            : -INFINITY;
+                    up_arr[vec_pos] = up;
+
+                    float left = is_offset_valid(offset_left)
+                                ? BAND_ARRAY(band_idx - 1,offset_left)
+                                : -INFINITY;
+                    left_arr[vec_pos] = left;
+
+                    float diag = is_offset_valid(offset_diag)
+                                ? BAND_ARRAY(band_idx - 2,offset_diag)
+                                : -INFINITY;
+                    diag_arr[vec_pos] = diag;
+
+                    lp_emission = log_probability_match_r9(scaling, models, events, event_idx,
+                                            kmer_rank, strand_idx, sample_rate);
+                    lp_emission_arr[vec_pos] = lp_emission;
+                    //simd_debug
+                    //fprintf(stderr, "lp emission : %f\n", lp_emission);
+                }
+
+                //convert data from the arrays to __m128
+                __m128 up_vec = _mm_set_ps(up_arr[0],up_arr[1],up_arr[2],up_arr[3]);
+                __m128 left_vec = _mm_set_ps(left_arr[0],left_arr[1],left_arr[2],left_arr[3]);
+                __m128 diag_vec = _mm_set_ps(diag_arr[0],diag_arr[1],diag_arr[2],diag_arr[3]);
+                __m128 lp_emission_vec = _mm_set_ps(lp_emission_arr[0],lp_emission_arr[1],lp_emission_arr[2],lp_emission_arr[3]);
+
+                __m128 score_d = _mm_add_ps(diag_vec,_mm_add_ps(lp_step_vec,lp_emission_vec));
+                __m128 score_u = _mm_add_ps(up_vec,_mm_add_ps(lp_stay_vec,lp_emission_vec));
+                __m128 score_l = _mm_add_ps(left_vec,lp_skip_vec);
+
+                __m128 max_score = score_d;
+                max_score = _mm_max_ps(score_l,_mm_max_ps(score_u,max_score));
+
+                //These vectors have a 1 where the max_score corresponds to the direction, and 0 where it doesn't
+                __m128i compare_up = compare_from_vec(max_score,score_u);
+                __m128i compare_left = compare_from_vec(max_score,score_l);
+                //FROM_D=0, FROM_U=1, FROM_L=2, so only need to add compare_up to 2 * compare_left
+                __m128i from = _mm_add_epi32(compare_up,_mm_add_epi32(compare_left,compare_left));
+
+                // print_band_trace(band_idx,max_score,from);
+
+                //Store results in BAND and TRACE array
+                float *band_position = &(BAND_ARRAY(band_idx,offset));
+                int32_t *trace_position = &(TRACE_ARRAY(band_idx,offset));
+
+                _mm_storer_ps(band_arr,max_score); 
+                band_position[0] = band_arr[0];
+                band_position[1] = band_arr[1];
+                band_position[2] = band_arr[2];
+                band_position[3] = band_arr[3];
+                
+                trace_position[0] = _mm_cvtsi128_si32(from);     
+                trace_position[1] = _mm_cvtsi128_si32(_mm_srli_epi32(from,32));
+                trace_position[2] = _mm_cvtsi128_si32(_mm_srli_epi32(from,64));
+                trace_position[3] = _mm_cvtsi128_si32 (_mm_srli_epi32(from,96));
+                
+
+                //simd_debug
+                //fprintf(stderr,"bands: %f %f %f %f\n",band_position[0],band_position[1],band_position[2],band_position[3]);
+                fprintf(stderr,"band array: %f %f %f %f\n",BAND_ARRAY(band_idx,offset),BAND_ARRAY(band_idx,offset+1),BAND_ARRAY(band_idx,offset+2),BAND_ARRAY(band_idx,offset+3));
+                //simd_debug
+                //fprintf(stderr,"traces: %d %d %d %d\n",trace_position[0],trace_position[1],trace_position[2],trace_position[3]);
+                fprintf(stderr,"offset: %d, trace array: %d %d %d %d\n",offset,TRACE_ARRAY(band_idx,offset),TRACE_ARRAY(band_idx,offset+1),TRACE_ARRAY(band_idx,offset+2),TRACE_ARRAY(band_idx,offset+3));
+                
+                fills += 4;
+            }
 #ifdef DEBUG_ADAPTIVE
             fprintf(stderr,
                     "[adafill] offset-up: %d offset-diag: %d offset-left: %d\n",
@@ -447,20 +629,15 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
                     band_idx, offset, event_idx, kmer_idx, max_score, from,
                     lp_emission);
 #endif
-            BAND_ARRAY(band_idx,offset) = max_score;
-            TRACE_ARRAY(band_idx,offset) = from;
-            fills += 1;
-
-            //Increment offset vector
-            offset_vec = _mm_add_epi32(offset_vec,increment_vec);
         }
     }
-
+    //simd_debug
+    // fprintf(stderr,"right: %d, down: %d\n",num_right,num_down);
     //
     // Backtrack to compute alignment
     //
-    float sum_emission = 0;
-    float n_aligned_events = 0;
+    double sum_emission = 0;
+    double n_aligned_events = 0;
 
     //>>>>>>>>>>>>>> New replacement begin
     // std::vector<AlignedPair> out;
@@ -481,15 +658,25 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
         assert((int32_t)band_idx < n_bands);
         //<<<<<<<<New Replacement over
         int32_t offset = band_event_to_offset(band_idx, event_idx);
+
+        //simd_debug
+        if(event_idx == 0){
+        fprintf(stderr,"bll[bi]: %d, offset: %d, band_idx: %d, event_idx: %d\n",band_lower_left[band_idx].event_idx,offset,band_idx,event_idx);
+        }
+
         if (is_offset_valid(offset)) {
             float s =
                 BAND_ARRAY(band_idx,offset) + (n_events - event_idx) * lp_trim;
+            //simd_debug
+            // fprintf(stderr,"s: %f, offset: %d, band_idx: %d, event_idx: %d\n",s,offset,band_idx,event_idx);
             if (s > max_score) {
                 max_score = s;
                 curr_event_idx = event_idx;
             }
         }
     }
+    //simd_debug
+    // fprintf(stderr,"max_score: %f, n_events: %d, curr_kmer_idx: %d\n",max_score,n_events,curr_kmer_idx);
 
 #ifdef DEBUG_ADAPTIVE
     fprintf(stderr, "[adaback] ei: %d ki: %d s: %.2f\n", curr_event_idx,
@@ -520,9 +707,13 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
         float tempLogProb = log_probability_match_r9(
             scaling, models, events, curr_event_idx, kmer_rank, 0, sample_rate);
 
+        //simd_debug
+        // fprintf(stderr,"curr_event: %d, kmer_rank: %d, sample: %f\n",curr_event_idx,kmer_rank,sample_rate);
+
         sum_emission += tempLogProb;
-        //fprintf(stderr, "lp_emission %f \n", tempLogProb);
-        //fprintf(stderr,"lp_emission %f, sum_emission %f, n_aligned_events %d\n",tempLogProb,sum_emission,outIndex);
+        // fprintf(stderr, "lp_emission %f \n", tempLogProb);
+        //simd_debug
+        // fprintf(stderr,"lp_emission %f, sum_emission %f, n_aligned_events %d\n",tempLogProb,sum_emission,outIndex);
 
         n_aligned_events += 1;
 
@@ -530,7 +721,7 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
         int32_t offset = band_event_to_offset(band_idx, curr_event_idx);
         assert(band_kmer_to_offset(band_idx, curr_kmer_idx) == offset);
 
-        uint8_t from = TRACE_ARRAY(band_idx,offset);
+        int32_t from = TRACE_ARRAY(band_idx,offset);
         if (from == FROM_D) {
             curr_kmer_idx -= 1;
             curr_event_idx -= 1;
@@ -570,14 +761,29 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
     //<<<<<<<<<New replacement over
 
     // QC results
-    float avg_log_emission = sum_emission / n_aligned_events;
-    //fprintf(stderr,"sum_emission %f, n_aligned_events %f, avg_log_emission %f\n",sum_emission,n_aligned_events,avg_log_emission);
+    double avg_log_emission = sum_emission / n_aligned_events;
+    //simd_debug
+    // fprintf(stderr,"sum_emission %f, n_aligned_events %f, avg_log_emission %f\n",sum_emission,n_aligned_events,avg_log_emission);
     //>>>>>>>>>>>>>New replacement begin
     bool spanned = out_2[0].ref_pos == 0 &&
                    out_2[outIndex - 1].ref_pos == int32_t(n_kmers - 1);
     // bool spanned = out.front().ref_pos == 0 && out.back().ref_pos == n_kmers - 1;
     //<<<<<<<<<<<<<New replacement over
     //bool failed = false;
+
+    //simd_debug
+    if(avg_log_emission < min_average_log_emission){
+        fprintf(stderr,"avg_log_emission < min_average_log_emission: %f, %f\n",avg_log_emission,min_average_log_emission);
+    }
+    //simd_debug
+    if( !spanned ){
+        fprintf(stderr,"not spanned\n");
+    }
+    //simd_debug
+    if(max_gap > max_gap_threshold){
+        fprintf(stderr,"max_gap > max_gap_threshold: %d, %d\n",max_gap,max_gap_threshold);
+    }
+
     if (avg_log_emission < min_average_log_emission || !spanned ||
         max_gap > max_gap_threshold) {
         //failed = true;
@@ -596,9 +802,22 @@ int32_t align_simd(AlignedPair* out_2, char* sequence, int32_t sequence_len,
         free(trace[i]);
     }
 #endif
+
+    //free regular mallocs
     free(bands);
     free(trace);
     free(band_lower_left);
+
+    //free sse2 mallocs
+    // free(band_vec);
+    // free(trace_vec);
+    free(up_arr);
+    free(left_arr);
+    free(diag_arr);
+    free(lp_emission_arr);
+    free(from_arr);
+    free(band_arr);
+
     //fprintf(stderr, "ada\t%s\t%s\t%.2lf\t%zu\t%.2lf\t%d\t%d\t%d\n", read.read_name.substr(0, 6).c_str(), failed ? "FAILED" : "OK", events_per_kmer, sequence.size(), avg_log_emission, curr_event_idx, max_gap, fills);
     //outSize=outIndex;
     //if(outIndex>500000)fprintf(stderr, "Max outSize %d\n", outIndex);

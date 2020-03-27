@@ -21,7 +21,8 @@ all=0
 
 #1st arg: which machine. Choices are: XAVIER, JETSON, NANOJET
 #2nd arg: upload ('u') or download ('d')
-#3rd arg: first word of filename to sync: param_test.sh ('param') or process_results.py ('process') or tune_parameters.sh ('tune') or 'all' to upload all files
+#3rd arg: first word of filename to sync:
+#param_test.sh ('param') or process_results.py ('process') or tune_parameters.sh ('tune') or remove_test.sh ('remove') or 'all' to upload all files
 
 
 if [[ $1 != $XAVIER ]] && [[ $1 != $NANOJET ]] && [[ $1 != $JETSON ]]; then
@@ -48,8 +49,11 @@ if [[ $2 = 'd' ]]; then
 		source="${server_folder}/f5c/scripts/tune_parameters.sh"
 		target="f5c/scripts"
 	elif [[ $3 = 'results' ]]; then
-		source="${server_folder}/results/${3}"
+		source="${server_folder}/results/${4}"
 		target="results"
+	elif [[ $3 = 'remove' ]]; then
+		source="${server_folder}/f5c/scripts/remove_test.sh"
+		target="f5c/scripts"
 	else
 		die "Failed. Please use 'param' for param_test.py or 'process' for process_results.py or 'tune' for tune_parameters.sh"
 	fi
@@ -63,12 +67,15 @@ elif [[ $2 = 'u' ]]; then
 	elif [[ $3 = 'tune' ]]; then
 		source="f5c/scripts/tune_parameters.sh"
 		target="${server_folder}/f5c/scripts"
+	elif [[ $3 = 'remove' ]]; then
+		source="f5c/scripts/remove_test.sh"
+		target="${server_folder}/f5c/scripts"
 	elif [[ $3 = 'all' ]]; then
 		all=1
 		source="f5c/scripts/param_test.sh"
 		target="${server_folder}/f5c/scripts"
 	else
-		die "Failed. Please use 'param' for param_test.py or 'process' for process_results.py or 'tune' for tune_parameters.sh or 'all' to upload all"
+		die "Failed. Please use 'param' for param_test.py or 'process' for process_results.py or 'tune' for tune_parameters.sh or 'remove' for remove_test.sh or 'all' to upload all"
 	fi
 	dos2unix.exe ${source}
 else
@@ -78,11 +85,20 @@ fi
 scp -r "${source}" "${target}"
 
 if [[ $all -eq 1 ]]; then
+	#process results
 	source="results/process_results.py"
 	target="${server_folder}/results"
 	dos2unix.exe ${source}
 	scp "${source}" "${target}"
+
+	#tune parameters
 	source="f5c/scripts/tune_parameters.sh"
+	target="${server_folder}/f5c/scripts"
+	dos2unix.exe ${source}
+	scp "${source}" "${target}"
+
+	#remove test
+	source="f5c/scripts/remove_test.sh"
 	target="${server_folder}/f5c/scripts"
 	dos2unix.exe ${source}
 	scp "${source}" "${target}"
