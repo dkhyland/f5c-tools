@@ -11,7 +11,7 @@ This repository contains f5c forked from Hasindu Gamaarachchi's repo https://git
 
 f5c-tools/\
 |--data/\
-   + |--[reference genome].fa\
+   * |--[reference genome].fa\
    |--[reference genome].fa.fai\
    |--[dataset_name]/\
       |--[fast5]/\
