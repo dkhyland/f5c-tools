@@ -9,13 +9,13 @@ This repository contains f5c forked from Hasindu Gamaarachchi's repo https://git
 4. Download some test data sets and run minimap2 (to align the sequences to the genome), samtools sort (to create a .bam file) and thne run samtools index on the generated .bam file. 
 4.1 Make sure each data set is contained in a folder which has the same name as the .bam files, .fastq files and that all fast5 files are in a subfolder named fast5. The directory tree should have the following structure:
 
-f5c-tools/
-|--data/
-   |--[reference genome].fa
-   |--[reference genome].fa.fai
-   |--[dataset_name]/
-      |--[fast5]/
-          |--\*.fast5
+f5c-tools/\
+|--data/\
+   |--[reference genome].fa\
+   |--[reference genome].fa.fai\
+   |--[dataset_name]/\
+      |--[fast5]/\
+          |--\*.fast5\
       |--[dataset_name].bam
       |--[dataset_name].bam.bai
       |--[dataset_name].fastq
