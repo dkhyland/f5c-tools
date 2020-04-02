@@ -8,10 +8,10 @@ This repository contains f5c forked from Hasindu Gamaarachchi's repo https://git
 3. Build f5c following the instructions from https://github.com/hasindu2008/f5c 
 4. Download some test data sets and run minimap2 (to align the sequences to the genome), samtools sort (to create a .bam file) and thne run samtools index on the generated .bam file. 
 4.1 Make sure each data set is contained in a folder which has the same name as the .bam files, .fastq files and that all fast5 files are in a subfolder named fast5. The directory tree should have the following structure:
-
-f5c-tools/\
+<pre><code>
+f5c-tools/
 |--data/\
-   * |--[reference genome].fa\
+   |--[reference genome].fa\
    |--[reference genome].fa.fai\
    |--[dataset_name]/\
       |--[fast5]/\
@@ -31,7 +31,7 @@ f5c-tools/\
    |--[dataset_name]/
    |--process_results.py
 |--tools/
-
+</code></pre>
 5. Move the data sets to the data folder contained in this repository.
 6. cd into the f5c folder.
 7. Run scripts/tune_parameters.sh -d {dataset} -n {numruns} where {dataset} is the name of the folder containing the test data in the data folder, and {numruns} is the number of runs to perform for each set of parameters.
