@@ -1,0 +1,4 @@
+[submodule "f5c"]
+	path = f5c
+	url = git@github.com:dkhyland/f5c.git
+	branch = profile
