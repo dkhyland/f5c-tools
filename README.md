@@ -6,7 +6,7 @@ This repository contains f5c forked from Hasindu Gamaarachchi's repo https://git
 1. Clone the repository
 2. Compile f5c 
 3. Build f5c following the instructions from https://github.com/hasindu2008/f5c 
-4. Download some test data sets and run minimap2 (to align the sequences to the genome), samtools sort (to create a .bam file) and thne run samtools index on the generated .bam file. 
+4. Download some test data sets and run minimap2 (to align the sequences to the genome), samtools sort (to create a .bam file) and then run samtools index on the generated .bam file. 
 4.1 Make sure each data set is contained in a folder which has the same name as the .bam files, .fastq files and that all fast5 files are in a subfolder named fast5. The directory tree should have the following structure:
 <pre><code>
 f5c-tools/
